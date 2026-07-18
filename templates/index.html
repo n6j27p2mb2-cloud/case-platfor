@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Case Intelligence Platform</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f7fa;
+            color: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container { width: 100%; max-width: 680px; padding: 40px 24px; }
+        .card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04);
+            text-align: center;
+        }
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.3px; }
+        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 28px; }
+
+        .upload-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+
+        .upload-zone {
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            padding: 32px 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafbfc;
+            position: relative;
+        }
+        .upload-zone:hover, .upload-zone.dragover { border-color: #4f46e5; background: #eef2ff; }
+        .upload-zone .icon { font-size: 32px; margin-bottom: 8px; opacity: 0.6; }
+        .upload-zone .label { font-size: 14px; font-weight: 600; color: #374151; }
+        .upload-zone .hint { color: #9ca3af; font-size: 11px; margin-top: 4px; }
+        .upload-zone .file-selected { font-size: 12px; color: #4f46e5; margin-top: 6px; display: none; }
+        .upload-zone.optional { border-style: dotted; background: #fdfdfd; }
+        .optional-badge {
+            display: inline-block;
+            background: #f3f4f6;
+            color: #6b7280;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 8px;
+            margin-left: 4px;
+        }
+
+        input[type="file"] { display: none; }
+
+        .privacy-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ecfdf5;
+            color: #065f46;
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+        }
+        .error-msg {
+            background: #fef2f2;
+            color: #991b1b;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 36px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s;
+        }
+        .btn-primary { background: #4f46e5; color: #fff; }
+        .btn-primary:hover { background: #4338ca; }
+        .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+        .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 24px; text-align: left; }
+        .feature-item { font-size: 12px; color: #6b7280; padding: 8px 10px; background: #f9fafb; border-radius: 8px; }
+        .feature-item span { display: block; color: #1f2937; font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Case Intelligence Platform</h1>
+            <p class="subtitle">上传 HR Case 数据，自动生成分析报告与环比对比</p>
+
+            <div class="privacy-badge">
+                🔒 自动过滤员工隐私数据，仅展示聚合统计结果
+            </div>
+
+            {% if request.args.get('error') %}
+            <div class="error-msg">{{ request.args.get('error') }}</div>
+            {% endif %}
+
+            <form action="/upload" method="POST" enctype="multipart/form-data" id="upload-form">
+                <input type="file" name="file" id="file-input" accept=".xlsx,.xls">
+                <input type="file" name="prev_file" id="prev-file-input" accept=".xlsx,.xls">
+
+                <div class="upload-row">
+                    <div class="upload-zone" id="zone-current"
+                         onclick="document.getElementById('file-input').click()">
+                        <div class="icon">📊</div>
+                        <div class="label">本月数据 *</div>
+                        <div class="hint">点击或拖拽上传</div>
+                        <div class="file-selected" id="current-name"></div>
+                    </div>
+                    <div class="upload-zone optional" id="zone-prev"
+                         onclick="document.getElementById('prev-file-input').click()">
+                        <div class="icon">📅</div>
+                        <div class="label">上月数据 <span class="optional-badge">可选</span></div>
+                        <div class="hint">用于环比对比</div>
+                        <div class="file-selected" id="prev-name"></div>
+                    </div>
+                </div>
+            </form>
+
+            <button class="btn btn-primary" id="submit-btn" disabled onclick="doSubmit()">
+                开始分析
+            </button>
+
+            <div class="features">
+                <div class="feature-item">
+                    <span>📂 分层分析</span>大类 → 子类 → 标题关键词
+                </div>
+                <div class="feature-item">
+                    <span>🔥 热点检测</span>高频 Case Type + 环比变化
+                </div>
+                <div class="feature-item">
+                    <span>📍 多维交叉</span>省份 · 员工来源 · 工作量
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFile = null;
+        let prevFile = null;
+
+        const zoneCurrent = document.getElementById('zone-current');
+        const zonePrev = document.getElementById('zone-prev');
+        const inputCurrent = document.getElementById('file-input');
+        const inputPrev = document.getElementById('prev-file-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const currentName = document.getElementById('current-name');
+        const prevName = document.getElementById('prev-name');
+
+        function setupZone(zone, input, nameEl, isRequired) {
+            zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+            zone.addEventListener('drop', e => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    // Assign to the correct input
+                    const dt = new DataTransfer();
+                    dt.items.add(files[0]);
+                    input.files = dt.files;
+                    updateFile(input, nameEl);
+                }
+            });
+            input.addEventListener('change', () => updateFile(input, nameEl));
+        }
+
+        function updateFile(input, nameEl) {
+            if (input.files.length > 0) {
+                const f = input.files[0];
+                if (!f.name.endsWith('.xlsx') && !f.name.endsWith('.xls')) return;
+                nameEl.textContent = '✓ ' + f.name;
+                nameEl.style.display = 'block';
+            }
+            refreshState();
+        }
+
+        function refreshState() {
+            currentFile = inputCurrent.files.length > 0;
+            prevFile = inputPrev.files.length > 0;
+            submitBtn.disabled = !currentFile;
+        }
+
+        function doSubmit() {
+            if (!currentFile) return;
+            submitBtn.disabled = true;
+            submitBtn.textContent = '分析中...';
+            document.getElementById('upload-form').submit();
+        }
+
+        setupZone(zoneCurrent, inputCurrent, currentName, true);
+        setupZone(zonePrev, inputPrev, prevName, false);
+    </script>
+</body>
+</html>
