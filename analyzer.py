@@ -389,6 +389,117 @@ def generate_insight_text(stats):
     return '\n'.join(lines)
 
 
+def _build_scatter(chat_heatmap):
+    """Convert heatmap data to Chart.js scatter format [{x: hour, y: count}]."""
+    points = []
+    for day in chat_heatmap:
+        for i, count in enumerate(day['hours']):
+            if count > 0:
+                points.append({'x': 9 + i, 'y': count})
+    return points
+
+
+def _section_insights(stats):
+    """Generate per-section analysis snippets (rule engine, no AI)."""
+    total = stats['total_cases']
+    insights = {}
+
+    # Section 1: 大类 + 构成 + 来源
+    top_hr = [h for h in stats['type_hierarchy'] if not h['is_non_hr']]
+    if top_hr:
+        insights['section1'] = (
+            f"本月 HR 相关 Case 以 {top_hr[0]['major']} 为主导"
+            f"（{top_hr[0]['count']} 条，{top_hr[0]['percentage']}%），"
+            f"Non-HR 转出 {stats['non_hr_count']} 条（{round(stats['non_hr_count']/total*100,1)}%）。"
+        )
+        chat_n = sum(d['count'] for d in stats['origin_distribution'] if d['name'] == 'Chat')
+        if chat_n / total > 0.85:
+            insights['section1'] += f" Chat 渠道占比 {round(chat_n/total*100,1)}%，自助化改造空间大。"
+
+    # Section 2: 子类排名
+    ranking = stats.get('subtype_ranking', [])
+    if ranking:
+        top = ranking[0]
+        insights['section2'] = (
+            f"刨除 Non-HR 后，最高频子类为 {top['subtype']}"
+            f"（{top['major']}，{top['count']} 条，{top['percentage']}%），"
+        )
+        if len(ranking) >= 3:
+            top3_total = sum(r['count'] for r in ranking[:3])
+            insights['section2'] += (
+                f"Top 3 子类合计 {top3_total} 条"
+                f"（{round(top3_total/total*100,1)}%）。"
+            )
+
+    # Section 3: Chat 进线
+    hourly = stats.get('chat_hourly_avg', [])
+    if hourly:
+        peak = max(hourly, key=lambda h: h['avg'])
+        insights['section3'] = (
+            f"Chat 进线高峰在 {peak['hour']}（日均 {peak['avg']} 条），"
+        )
+        if peak['avg'] >= 3:
+            insights['section3'] += "建议此时段保持充足人力。"
+        else:
+            insights['section3'] += "整体进线量不高，当前人力可覆盖。"
+
+    # Section 4: 处理效率
+    eff = stats.get('processing_efficiency', {})
+    if eff.get('median_sec') is not None:
+        if eff['lt1min_pct'] > 70:
+            insights['section4'] = (
+                f"{eff['lt1min_pct']}% 的 Case 在 1 分钟内闭环，"
+                f"中位处理时长仅 {_fmt_duration(eff['median_sec'])}，"
+                f"说明大部分为秒答型问题。P90 {_fmt_duration(eff['p90_sec'])}，"
+                f"复杂 Case 仍有优化空间。"
+            )
+        else:
+            insights['section4'] = (
+                f"中位处理时长 {_fmt_duration(eff['median_sec'])}，"
+                f"P90 {_fmt_duration(eff['p90_sec'])}。"
+            )
+
+    # Section 5: 地区 + 员工
+    prov = stats.get('province_summary', [])
+    emp = stats.get('employee_type_stats', [])
+    if prov:
+        insights['section5'] = f"{prov[0]['province']} Case 量最高（{prov[0]['total']} 条）。"
+        if emp:
+            internal = [e for e in emp if '系统内' in e['type']]
+            if internal:
+                insights['section5'] += f" 员工来源以{internal[0]['type']}为主（{internal[0]['count']} 条）。"
+
+    # Section 6: 工作量 + 解决
+    owners = stats.get('owner_stats', [])
+    res = stats.get('resolution_counts', {})
+    if owners:
+        insights['section6'] = f"团队 {len(owners)} 人，工作量最高为 {owners[0]['name']}（{owners[0]['count']} 条）。"
+        csat = res.get('CSAT', 0)
+        no_csat = res.get('No CSAT', 0)
+        closed_total = eff.get('total_closed', total)
+        csat_pct = round(csat / closed_total * 100, 1) if closed_total > 0 else 0
+        if csat_pct < 60:
+            insights['section6'] += f" CSAT 回收率 {csat_pct}% 偏低，建议推动满意度收集。"
+
+    return insights
+
+
+def _growth_alerts(type_hierarchy, threshold_pct=30):
+    """Detect items with MoM growth > threshold. Returns list of {name, delta_pct}."""
+    alerts = []
+    for h in type_hierarchy:
+        if h.get('delta_pct') and abs(h['delta_pct']) >= threshold_pct:
+            alerts.append({
+                'name': h['major'],
+                'delta': h['delta'],
+                'delta_pct': h['delta_pct'],
+                'is_increase': h['delta'] > 0,
+            })
+    # Sort by abs delta_pct descending
+    alerts.sort(key=lambda a: -abs(a['delta_pct']))
+    return alerts
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def parse_excel(filepath):
@@ -541,6 +652,9 @@ def analyze(df):
     # ── Weekly trend ──
     weekly_trend = _weekly_trend(df)
 
+    # ── Daily trend ──
+    daily_trend = _daily_trend(df)
+
     # ── Origin ──
     origin_counts = df['Origin'].value_counts().to_dict() if 'Origin' in df.columns else {}
 
@@ -570,6 +684,7 @@ def analyze(df):
 
     # ── NEW: Chat heatmap ──
     chat_heatmap, chat_hourly_avg, heatmap_max = _chat_heatmap(df)
+    chat_scatter = _build_scatter(chat_heatmap)
 
     # ── NEW: Processing efficiency ──
     processing_efficiency = _processing_efficiency(df)
@@ -589,6 +704,7 @@ def analyze(df):
         'employee_type_stats': employee_type_stats,
         'owner_stats': owner_stats,
         'weekly_trend': weekly_trend,
+        'daily_trend': daily_trend,
         'origin_distribution': _fmt_dist(origin_counts, total),
         'resolution_counts': resolution_counts,
         'date_range': date_range,
@@ -598,12 +714,21 @@ def analyze(df):
         'subtype_ranking': subtype_ranking,
         'chat_heatmap': chat_heatmap,
         'chat_hourly_avg': chat_hourly_avg,
+        'chat_scatter': chat_scatter,
         'heatmap_max': heatmap_max,
         'processing_efficiency': processing_efficiency,
         'sla_stats': sla_stats,
+        'section_insights': _section_insights({
+            'total_cases': total, 'non_hr_count': non_hr_count,
+            'type_hierarchy': type_hierarchy, 'origin_distribution': _fmt_dist(origin_counts, total),
+            'subtype_ranking': subtype_ranking, 'chat_hourly_avg': chat_hourly_avg,
+            'processing_efficiency': processing_efficiency, 'province_summary': province_summary,
+            'employee_type_stats': employee_type_stats, 'owner_stats': owner_stats,
+            'resolution_counts': resolution_counts,
+        }),
     }
 
-    # ── NEW: Auto insight text ──
+    # Keep insight_text for Word report only (not displayed on dashboard)
     stats['insight_text'] = generate_insight_text(stats)
 
     return stats
@@ -649,10 +774,49 @@ def compute_comparison(current, previous=None):
         e['prev_count'] = pcount
         e['delta'] = e['count'] - pcount
 
+    # Growth alerts: items with MoM change > 30%
+    current['growth_alerts'] = _growth_alerts(current['type_hierarchy'], threshold_pct=30)
+
+    # Subtype growth: compare subtype_ranking between months
+    prev_subtype_map = {}
+    if previous:
+        for s in previous.get('subtype_ranking', []):
+            prev_subtype_map[(s['major'], s['subtype'])] = s['count']
+    for s in current.get('subtype_ranking', []):
+        key = (s['major'], s['subtype'])
+        pcount = prev_subtype_map.get(key, 0)
+        s['prev_count'] = pcount
+        if pcount > 0:
+            s['delta'] = s['count'] - pcount
+            s['delta_pct'] = round(s['delta'] / pcount * 100, 1)
+        else:
+            s['delta'] = s['count'] if pcount == 0 else 0
+            s['delta_pct'] = None  # New subtype, no baseline
+
+    # Subtype growth alerts
+    current['subtype_alerts'] = [
+        {'subtype': s['subtype'], 'major': s['major'],
+         'delta': s['delta'], 'delta_pct': s['delta_pct'],
+         'is_increase': s['delta'] > 0}
+        for s in current.get('subtype_ranking', [])
+        if s.get('delta_pct') and abs(s['delta_pct']) >= 30
+    ]
+    current['subtype_alerts'].sort(key=lambda a: -abs(a['delta_pct']))
+
     return current
 
 
 # ── Internal ─────────────────────────────────────────────────────────────────
+
+def _daily_trend(df):
+    if 'Created' not in df.columns:
+        return []
+    valid = df.dropna(subset=['Created'])
+    if len(valid) == 0:
+        return []
+    daily = valid.set_index('Created').resample('D').size()
+    return [{'date': d.strftime('%m-%d'), 'count': int(c)} for d, c in daily.items() if c > 0]
+
 
 def _weekly_trend(df):
     if 'Created' not in df.columns:
