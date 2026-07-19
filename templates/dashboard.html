@@ -310,12 +310,6 @@
                 <canvas id="dailyTrendChart" style="max-height:260px;"></canvas>
             </div>
         </div>
-        <div style="margin-top:18px;">
-            <div class="panel">
-                <h2>时段散点分布 <span class="section-desc">每点 = 某天某小时的 Case 量</span></h2>
-                <canvas id="scatterChart" style="max-height:220px;"></canvas>
-            </div>
-        </div>
         {% if stats.section_insights.section3 %}
         <div class="section-end">{{ stats.section_insights.section3 }}</div>
         {% endif %}
@@ -598,47 +592,6 @@ new Chart(document.getElementById('dailyTrendChart'), {
         scales: {
             y: { ticks: { font: { size: 10 } }, title: { display: true, text: 'Case', font: { size: 10 } } },
             x: { ticks: { font: { size: 9 }, maxRotation: 45 } }
-        }
-    }
-});
-
-// -- Scatter Chart --
-const scatterData = {{ stats.chat_scatter | tojson }};
-new Chart(document.getElementById('scatterChart'), {
-    type: 'scatter',
-    data: {
-        datasets: [{
-            label: 'Chat Case',
-            data: scatterData,
-            backgroundColor: 'rgba(79, 70, 229, 0.4)',
-            borderColor: 'rgba(79, 70, 229, 0.6)',
-            pointRadius: 5,
-            pointHoverRadius: 7,
-        }]
-    },
-    options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false },
-            tooltip: {
-                callbacks: {
-                    label: function(ctx) {
-                        return ` ${ctx.raw.x}:00 — ${ctx.raw.y} 条`;
-                    }
-                }
-            }
-        },
-        scales: {
-            x: {
-                title: { display: true, text: '小时', font: { size: 10 } },
-                ticks: { stepSize: 1, font: { size: 9 } },
-                min: 8.5, max: 18.5,
-            },
-            y: {
-                title: { display: true, text: 'Case 数量', font: { size: 10 } },
-                ticks: { font: { size: 9 } },
-                beginAtZero: true,
-            }
         }
     }
 });
