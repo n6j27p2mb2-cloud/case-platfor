@@ -110,7 +110,7 @@
             <div class="ksub">
                 {% if has_comparison and stats.total_delta is not none %}
                 <span class="kdelta {{ 'delta-up' if stats.total_delta > 0 else 'delta-down' if stats.total_delta < 0 else 'delta-zero' }}">
-                    {{ '&#9650;' if stats.total_delta > 0 else '&#9660;' if stats.total_delta < 0 else '&#8594;' }}
+                    {{ '▲' if stats.total_delta > 0 else '▼' if stats.total_delta < 0 else '→' }}
                     {{ stats.total_delta|abs }}{% if stats.total_delta_pct is not none %}({{ stats.total_delta_pct }}%){% endif %}
                 </span> vs 上月
                 {% else %}<span style="color:#9ca3af;">无对比</span>{% endif %}
@@ -173,7 +173,7 @@
                         {% set major_idx.value = major_idx.value + 1 %}
                         <tr class="major-row {{ 'open' if h.is_non_hr else '' }}" onclick="toggleMinor(this)" data-major="{{ major_idx.value }}">
                             <td>
-                                <span class="arrow">&#9654;</span>
+                                <span class="arrow">▶</span>
                                 <strong>{{ h.major }}</strong>
                                 {% if h.is_non_hr %}<span class="non-hr-tag">Non-HR</span>{% endif %}
                                 {% if h in stats.hotspots %}<span class="hot-tag">热点</span>{% endif %}
@@ -183,11 +183,11 @@
                             <td>
                                 {% if has_comparison and h.delta is not none and h.delta != 0 %}
                                 <span class="kdelta {{ 'delta-up' if h.delta > 0 else 'delta-down' }}">
-                                    {{ '&#9650;' if h.delta > 0 else '&#9660;' }}{{ h.delta|abs }}
+                                    {{ '▲' if h.delta > 0 else '▼' }}{{ h.delta|abs }}
                                     {% if h.delta_pct is not none %}({{ h.delta_pct }}%){% endif %}
                                 </span>
                                 {% elif has_comparison %}
-                                <span class="kdelta delta-zero">&#8594; 0</span>
+                                <span class="kdelta delta-zero">→ 0</span>
                                 {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                             </td>
                             <td>
@@ -199,7 +199,7 @@
                         </tr>
                         {% for m in h.minors %}
                         <tr class="minor-row" data-parent="{{ major_idx.value }}">
-                            <td>&boxur; {{ m.name }}</td>
+                            <td>└ {{ m.name }}</td>
                             <td>{{ m.count }}</td>
                             <td>{{ m.percentage }}%</td>
                             <td colspan="2"></td>
@@ -212,11 +212,11 @@
             <div>
                 <div class="panel" style="margin-bottom:18px;">
                     <h2>Case 构成</h2>
-                    <canvas id="breakdownChart" style="max-height:200px;"></canvas>
+                    <canvas id="breakdownChart" style="max-height:240px;"></canvas>
                 </div>
                 <div class="panel" style="margin-bottom:18px;">
                     <h2>来源分布</h2>
-                    <canvas id="originChart" style="max-height:200px;"></canvas>
+                    <canvas id="originChart" style="max-height:240px;"></canvas>
                 </div>
                 <div class="panel">
                     <h2>本月热词</h2>
@@ -255,11 +255,11 @@
                             <td>
                                 {% if has_comparison and s.get('delta_pct') is not none %}
                                     {% if s.delta_pct > 0 %}
-                                    <span style="color:#dc2626;font-weight:600;">&#9650; {{ s.delta_pct }}%</span>
+                                    <span style="color:#dc2626;font-weight:600;">▲ {{ s.delta_pct }}%</span>
                                     {% elif s.delta_pct < 0 %}
-                                    <span style="color:#059669;font-weight:600;">&#9660; {{ s.delta_pct|abs }}%</span>
+                                    <span style="color:#059669;font-weight:600;">▼ {{ s.delta_pct|abs }}%</span>
                                     {% else %}
-                                    <span style="color:#9ca3af;">&#8594; 0</span>
+                                    <span style="color:#9ca3af;">→ 0</span>
                                     {% endif %}
                                 {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                             </td>
@@ -411,10 +411,10 @@
                             <td>
                                 {% if has_comparison and o.get('delta') is not none and o.delta != 0 %}
                                 <span class="kdelta {{ 'delta-up' if o.delta > 0 else 'delta-down' }}">
-                                    {{ '&#9650;' if o.delta > 0 else '&#9660;' }}{{ o.delta|abs }}
+                                    {{ '▲' if o.delta > 0 else '▼' }}{{ o.delta|abs }}
                                 </span>
                                 {% elif has_comparison %}
-                                <span class="kdelta delta-zero">&#8594; 0</span>
+                                <span class="kdelta delta-zero">→ 0</span>
                                 {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                             </td>
                         </tr>
