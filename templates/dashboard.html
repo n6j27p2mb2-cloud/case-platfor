@@ -214,9 +214,19 @@
                     <h2>Case 构成</h2>
                     <canvas id="breakdownChart" style="max-height:200px;"></canvas>
                 </div>
-                <div class="panel">
+                <div class="panel" style="margin-bottom:18px;">
                     <h2>来源分布</h2>
                     <canvas id="originChart" style="max-height:200px;"></canvas>
+                </div>
+                <div class="panel">
+                    <h2>本月热词</h2>
+                    <div class="hot-kw-list">
+                        {% for kw in stats.hot_keywords[:12] %}
+                        <span class="hot-kw-pill" style="background:{{ ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#f472b6','#fb923c'][loop.index0] }};">
+                            {{ kw.keyword }} <span style="opacity:0.8;font-size:10px;">{{ kw.count }}</span>
+                        </span>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
         </div>
@@ -259,11 +269,13 @@
                 </table>
             </div>
         </div>
-        {% if has_comparison and stats.subtype_alerts %}
+        {% if has_comparison and stats.subtype_growth_ranking %}
         <div class="section-end alert">
-            <strong>子类环比预警：</strong>
-            {% for a in stats.subtype_alerts[:5] %}
-            {{ a.subtype }}({{ a.major }}) {{ '↑' if a.is_increase else '↓' }}{{ a.delta_pct|abs }}%{% if not loop.last %} &nbsp;|&nbsp; {% endif %}
+            <strong>子类环比变化排名：</strong>
+            {% for s in stats.subtype_growth_ranking[:8] %}
+            <span style="color:{{ '#dc2626' if s.delta > 0 else '#059669' }};">
+                {{ s.subtype }} {{ '↑' if s.delta > 0 else '↓' }}{{ s.delta_pct|abs }}%
+            </span>{% if not loop.last %} &nbsp;|&nbsp; {% endif %}
             {% endfor %}
         </div>
         {% endif %}
@@ -416,16 +428,6 @@
             </div>
         </div>
         <div class="grid-2" style="margin-bottom:18px;">
-            <div class="panel">
-                <h2>本月热词</h2>
-                <div class="hot-kw-list">
-                    {% for kw in stats.hot_keywords[:12] %}
-                    <span class="hot-kw-pill" style="background:{{ ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#f472b6','#fb923c'][loop.index0] }};">
-                        {{ kw.keyword }} <span style="opacity:0.8;font-size:10px;">{{ kw.count }}</span>
-                    </span>
-                    {% endfor %}
-                </div>
-            </div>
             <div class="panel" style="text-align:center;">
                 <h2 style="justify-content:center;">导出报告</h2>
                 <p style="font-size:12px;color:#6b7280;margin:16px 0;">下载 Word 格式完整分析报告<br>含图表和月度摘要</p>

@@ -803,6 +803,12 @@ def compute_comparison(current, previous=None):
     ]
     current['subtype_alerts'].sort(key=lambda a: -abs(a['delta_pct']))
 
+    # Subtype growth ranking (top 10 by absolute change)
+    current['subtype_growth_ranking'] = sorted(
+        [s for s in current.get('subtype_ranking', []) if s.get('delta_pct') is not None],
+        key=lambda s: -abs(s['delta_pct'])
+    )[:10]
+
     return current
 
 
