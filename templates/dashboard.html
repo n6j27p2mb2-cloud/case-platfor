@@ -270,13 +270,27 @@
             </div>
         </div>
         {% if has_comparison and stats.subtype_growth_ranking %}
-        <div class="section-end alert">
-            <strong>子类环比变化排名：</strong>
-            {% for s in stats.subtype_growth_ranking[:8] %}
-            <span style="color:{{ '#dc2626' if s.delta > 0 else '#059669' }};">
-                {{ s.subtype }} {{ '↑' if s.delta > 0 else '↓' }}{{ s.delta_pct|abs }}%
-            </span>{% if not loop.last %} &nbsp;|&nbsp; {% endif %}
-            {% endfor %}
+        <div class="panel" style="margin-top:18px;">
+            <h2>子类环比变化排行 <span class="section-desc">增长最多 & 下降最多</span></h2>
+            <table class="type-table">
+                <thead><tr><th>排名</th><th>子类</th><th>所属大类</th><th>本月</th><th>上月</th><th>环比变化</th></tr></thead>
+                <tbody>
+                {% for s in stats.subtype_growth_ranking[:10] %}
+                    <tr>
+                        <td style="color:#9ca3af;">{{ loop.index }}</td>
+                        <td><strong>{{ s.subtype }}</strong></td>
+                        <td style="font-size:11px;color:#6b7280;">{{ s.major }}</td>
+                        <td>{{ s.count }}</td>
+                        <td style="color:#9ca3af;">{{ s.prev_count }}</td>
+                        <td>
+                            <span style="color:{{ '#dc2626' if s.delta > 0 else '#059669' }};font-weight:600;">
+                                {{ '↑' if s.delta > 0 else '↓' }}{{ s.delta|abs }} ({{ s.delta_pct|abs }}%)
+                            </span>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% endif %}
         {% if stats.section_insights.section2 %}
@@ -401,22 +415,13 @@
             <div class="panel">
                 <h2>六、团队工作量分布</h2>
                 <table class="type-table">
-                    <thead><tr><th>Owner</th><th>数量</th><th>占比</th><th>环比</th></tr></thead>
+                    <thead><tr><th>Owner</th><th>数量</th><th>占比</th></tr></thead>
                     <tbody>
                     {% for o in stats.owner_stats %}
                         <tr>
                             <td><strong>{{ o.name }}</strong></td>
                             <td>{{ o.count }}</td>
                             <td>{{ o.percentage }}%</td>
-                            <td>
-                                {% if has_comparison and o.get('delta') is not none and o.delta != 0 %}
-                                <span class="kdelta {{ 'delta-up' if o.delta > 0 else 'delta-down' }}">
-                                    {{ '▲' if o.delta > 0 else '▼' }}{{ o.delta|abs }}
-                                </span>
-                                {% elif has_comparison %}
-                                <span class="kdelta delta-zero">→ 0</span>
-                                {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
-                            </td>
                         </tr>
                     {% endfor %}
                     </tbody>
