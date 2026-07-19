@@ -25,6 +25,15 @@ PII_DROP = [
     'Involved Party - Role',
 ]
 
+INSIGHT_THRESHOLDS = {
+    'nonhr_pct_alert': 15.0,        # Non-HR 占比 > 15% → 分流建议
+    'csat_low_pct': 60.0,           # CSAT 回收率 < 60% → 满意度建议
+    'lt1min_high_pct': 70.0,        # 1分钟内闭环率 > 70% → 自助化潜力
+    'subtype_concentration': 8.0,   # 子类占比 > 8% → 值得关注
+    'eom_peak_ratio': 1.30,         # (不再使用，保留占位)
+    'sla_alert_pct': 95.0,          # SLA 达成率 < 95% → 预警
+}
+
 CHINESE_STOP_WORDS = {
     '咨询', '员工', '个人', '查询', '帮助', '入职', '离职', '相关', '进行',
     '问题', '处理', '提供', '一个', '联系', '了解', '可以', '需要', '什么',
@@ -150,6 +159,234 @@ def _count_non_hr(df):
     return int(df['Case Type'].apply(
         lambda x: str(x).startswith('Non-HR') if pd.notna(x) else False
     ).sum())
+
+
+def _subtype_ranking(type_hierarchy, total, top_n=20):
+    """Flat subtype ranking across all majors, excluding Non-HR."""
+    all_subtypes = []
+    for h in type_hierarchy:
+        if h['is_non_hr']:
+            continue
+        for m in h['minors']:
+            all_subtypes.append({
+                'subtype': m['name'],
+                'major': h['major'],
+                'count': m['count'],
+                'percentage': m['percentage'],
+            })
+    all_subtypes.sort(key=lambda x: -x['count'])
+    return all_subtypes[:top_n]
+
+
+def _chat_heatmap(df):
+    """Build chat-only hourly heatmap: per-day matrix + hourly average.
+    Only Chat origin, hours 9-18. Returns (heatmap_data, hourly_avg, max_val)."""
+    if 'Origin' not in df.columns or 'Created' not in df.columns:
+        return [], [], 0
+
+    chat = df[(df['Origin'] == 'Chat') & df['Created'].notna()].copy()
+    if len(chat) == 0:
+        return [], [], 0
+
+    chat['_date'] = chat['Created'].dt.strftime('%m-%d')
+    chat['_hour'] = chat['Created'].dt.hour
+
+    # Filter 9-18
+    chat = chat[(chat['_hour'] >= 9) & (chat['_hour'] <= 18)]
+
+    dates = sorted(chat['_date'].unique())
+    hours = list(range(9, 19))  # 9..18
+
+    # Per-day matrix
+    day_hour_counts = chat.groupby(['_date', '_hour']).size()
+    max_val = 0
+    heatmap_data = []
+    for d in dates:
+        row = []
+        for h in hours:
+            c = int(day_hour_counts.get((d, h), 0))
+            row.append(c)
+            if c > max_val:
+                max_val = c
+        heatmap_data.append({'date': d, 'hours': row})
+
+    # Hourly average (across all days that have chat data)
+    workdays = len(dates) or 1
+    hourly_counts = chat.groupby('_hour').size()
+    hourly_avg = [
+        {'hour': f'{h}:00', 'avg': round(int(hourly_counts.get(h, 0)) / workdays, 1)}
+        for h in hours
+    ]
+
+    return heatmap_data, hourly_avg, max_val
+
+
+def _processing_efficiency(df):
+    """Compute processing duration stats for Closed cases only.
+    Returns {median_sec, p90_sec, avg_sec, lt1min_n, lt1min_pct, total_closed}."""
+    if 'Created' not in df.columns or 'Last Close Date' not in df.columns:
+        return {'median_sec': None, 'p90_sec': None, 'avg_sec': None,
+                'lt1min_n': 0, 'lt1min_pct': 0, 'total_closed': 0}
+
+    closed = df[
+        (df['Condition'] == 'Closed') &
+        df['Created'].notna() &
+        df['Last Close Date'].notna()
+    ]
+    if len(closed) == 0:
+        return {'median_sec': None, 'p90_sec': None, 'avg_sec': None,
+                'lt1min_n': 0, 'lt1min_pct': 0, 'total_closed': 0}
+
+    durations = []
+    for _, row in closed.iterrows():
+        dur = (row['Last Close Date'] - row['Created']).total_seconds()
+        if dur >= 0:
+            durations.append(dur)
+
+    if not durations:
+        return {'median_sec': None, 'p90_sec': None, 'avg_sec': None,
+                'lt1min_n': 0, 'lt1min_pct': 0, 'total_closed': len(closed)}
+
+    durations.sort()
+    n = len(durations)
+    lt1min_n = sum(1 for d in durations if d < 60)
+
+    return {
+        'median_sec': durations[n // 2],
+        'p90_sec': durations[int(n * 0.9)],
+        'avg_sec': sum(durations) / n,
+        'lt1min_n': lt1min_n,
+        'lt1min_pct': round(lt1min_n / n * 100, 1),
+        'total_closed': len(closed),
+    }
+
+
+def _sla_stats(df):
+    """SLA violation stats. Returns {violated, total_checked, compliance_rate}."""
+    if 'SLA Is Violated' not in df.columns:
+        return {'violated': 0, 'total_checked': 0, 'compliance_rate': None}
+
+    col = df['SLA Is Violated']
+    violated = int(sum(
+        col.apply(lambda x: str(x).strip().lower() in ('true', '1', 'yes'))
+    ))
+    return {
+        'violated': violated,
+        'total_checked': len(df),
+        'compliance_rate': round((len(df) - violated) / len(df) * 100, 1) if len(df) > 0 else None,
+    }
+
+
+def _fmt_duration(sec):
+    """Format seconds to human-readable string."""
+    if sec is None:
+        return '—'
+    if sec < 60:
+        return f'{sec:.0f}秒'
+    if sec < 3600:
+        return f'{sec/60:.1f}分钟'
+    return f'{sec/3600:.1f}小时'
+
+
+def generate_insight_text(stats):
+    """Generate a Chinese markdown summary from stats using rule engine."""
+    lines = []
+    lines.append('## 本月摘要')
+    lines.append('')
+    lines.append(f"**统计区间**：{stats['date_range']['start']} → {stats['date_range']['end']}  "
+                 f"（{stats['date_range']['days']} 天）")
+    lines.append('')
+
+    # 一、总量
+    lines.append('### 一、总量概览')
+    total = stats['total_cases']
+    origin = stats['origin_distribution']
+    chat_n = next((d['count'] for d in origin if d['name'] == 'Chat'), 0)
+    email_n = next((d['count'] for d in origin if d['name'] == 'Email'), 0)
+    lines.append(f'本月共处理 **{total}** 个 Case。')
+    if chat_n or email_n:
+        parts = []
+        if chat_n:
+            parts.append(f'Chat {chat_n}（{round(chat_n/total*100,1)}%）')
+        if email_n:
+            parts.append(f'Email {email_n}（{round(email_n/total*100,1)}%）')
+        lines.append(f'渠道：{"、".join(parts)}。')
+    sla = stats.get('sla_stats', {})
+    if sla.get('compliance_rate') is not None:
+        viol_text = '全部达标' if sla['violated'] == 0 else f"{sla['violated']}个违规"
+        lines.append(f"SLA 达成率 **{sla['compliance_rate']}%**（{viol_text}）。")
+    lines.append('')
+
+    # 二、处理效率
+    eff = stats.get('processing_efficiency', {})
+    if eff.get('median_sec') is not None:
+        lines.append('### 二、处理效率')
+        lines.append(f"中位处理时长 **{_fmt_duration(eff['median_sec'])}**，"
+                     f"P90 {_fmt_duration(eff['p90_sec'])}。")
+        if eff['lt1min_pct'] > INSIGHT_THRESHOLDS['lt1min_high_pct']:
+            lines.append(f"{eff['lt1min_n']} 个 Case（{eff['lt1min_pct']}%）在 1 分钟内闭环，"
+                         f"秒答型为主，自助化潜力大。")
+        else:
+            lines.append(f"{eff['lt1min_n']} 个 Case（{eff['lt1min_pct']}%）在 1 分钟内闭环。")
+        lines.append('')
+
+    # 三、结构分布
+    lines.append('### 三、结构分布')
+    top3 = stats['type_hierarchy'][:3]
+    top3_str = '、'.join(f"{h['major']}({h['count']})" for h in top3)
+    lines.append(f'Case 量 TOP3 大类：{top3_str}。')
+    lines.append(f"Non-HR 转出 {stats['non_hr_count']} 个，占比 {round(stats['non_hr_count']/total*100,1)}%。")
+
+    hr_top = [h for h in stats['type_hierarchy'] if not h['is_non_hr']]
+    if hr_top:
+        hr_total = sum(h['count'] for h in hr_top)
+        lines.append(f"HR 内部最大类 **{hr_top[0]['major']}**"
+                     f"（{hr_top[0]['count']} 个，占 HR 总量 {round(hr_top[0]['count']/hr_total*100,1)}%）。")
+    lines.append('')
+
+    # 子类排名 Top 5
+    ranking = stats.get('subtype_ranking', [])
+    if ranking:
+        lines.append('### 四、高频子类 Top 5')
+        for i, r in enumerate(ranking[:5], 1):
+            lines.append(f"{i}. **{r['subtype']}**（{r['major']}）：{r['count']} 条（{r['percentage']}%）")
+        lines.append('')
+
+    # 五、质量信号
+    res = stats.get('resolution_counts', {})
+    csat_total = res.get('CSAT', 0)
+    closed_total = eff.get('total_closed', total)
+    csat_pct = round(csat_total / closed_total * 100, 1) if closed_total > 0 else 0
+    no_csat = res.get('No CSAT', 0)
+    third_party = res.get('3rd Party', 0)
+    dup = res.get('Duplicate', 0)
+    lines.append('### 五、质量信号')
+    lines.append(f"CSAT 回收率 {csat_pct}%（{csat_total} / {closed_total}），"
+                 f"No CSAT {no_csat} 个，转三方 {third_party} 个，重复工单 {dup} 个。")
+    lines.append('')
+
+    # 六、建议
+    suggestions = []
+    nonhr_pct = round(stats['non_hr_count'] / total * 100, 1) if total > 0 else 0
+    if nonhr_pct > INSIGHT_THRESHOLDS['nonhr_pct_alert']:
+        suggestions.append(f"Non-HR 占比 {nonhr_pct}% 偏高，建议优化员工自助导航分流")
+    if csat_pct < INSIGHT_THRESHOLDS['csat_low_pct'] and closed_total > 0:
+        suggestions.append(f"CSAT 回收率 {csat_pct}% 偏低（<{INSIGHT_THRESHOLDS['csat_low_pct']}%），建议优化结束话术")
+    if sla.get('compliance_rate') is not None and sla['compliance_rate'] < INSIGHT_THRESHOLDS['sla_alert_pct']:
+        suggestions.append(f"SLA 达成率 {sla['compliance_rate']}% 低于 {INSIGHT_THRESHOLDS['sla_alert_pct']}%，需关注")
+    if eff.get('lt1min_pct', 0) > INSIGHT_THRESHOLDS['lt1min_high_pct']:
+        suggestions.append(f"1分钟内闭环率达 {eff['lt1min_pct']}%，可考虑 FAQ/知识库自助化")
+
+    if suggestions:
+        lines.append('### 六、建议行动')
+        for i, s in enumerate(suggestions, 1):
+            lines.append(f'{i}. {s}')
+        lines.append('')
+
+    lines.append('---')
+    lines.append('*由 Case Intelligence Platform 规则引擎自动生成*')
+
+    return '\n'.join(lines)
 
 
 # ── Main ────────────────────────────────────────────────────────────────────
@@ -328,7 +565,19 @@ def analyze(df):
         '系统重复': dup_count,
     }
 
-    return {
+    # ── NEW: Subtype cross-category ranking ──
+    subtype_ranking = _subtype_ranking(type_hierarchy, total)
+
+    # ── NEW: Chat heatmap ──
+    chat_heatmap, chat_hourly_avg, heatmap_max = _chat_heatmap(df)
+
+    # ── NEW: Processing efficiency ──
+    processing_efficiency = _processing_efficiency(df)
+
+    # ── NEW: SLA stats ──
+    sla_stats = _sla_stats(df)
+
+    stats = {
         'total_cases': total,
         'hr_count': hr_count,
         'non_hr_count': non_hr_count,
@@ -345,7 +594,19 @@ def analyze(df):
         'date_range': date_range,
         'hot_keywords': hot_keywords,
         'case_breakdown': case_breakdown,
+        # New fields
+        'subtype_ranking': subtype_ranking,
+        'chat_heatmap': chat_heatmap,
+        'chat_hourly_avg': chat_hourly_avg,
+        'heatmap_max': heatmap_max,
+        'processing_efficiency': processing_efficiency,
+        'sla_stats': sla_stats,
     }
+
+    # ── NEW: Auto insight text ──
+    stats['insight_text'] = generate_insight_text(stats)
+
+    return stats
 
 
 def compute_comparison(current, previous=None):
