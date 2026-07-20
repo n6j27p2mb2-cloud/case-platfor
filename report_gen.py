@@ -161,6 +161,24 @@ def _draw_resolution_donut(stats):
     return _chart_to_image(fig)
 
 
+def _draw_daily_trend(stats):
+    """Line chart: daily case trend."""
+    daily = stats.get('daily_trend', [])
+    if not daily:
+        return None
+    dates = [d['date'] for d in daily]
+    counts = [d['count'] for d in daily]
+
+    fig, ax = plt.subplots(figsize=(8, 3))
+    ax.fill_between(range(len(dates)), counts, alpha=0.1, color=PRIMARY)
+    ax.plot(range(len(dates)), counts, color=PRIMARY, linewidth=1.5, marker='o', markersize=3)
+    ax.set_xticks(range(0, len(dates), max(1, len(dates)//15)))
+    ax.set_xticklabels([dates[i] for i in range(0, len(dates), max(1, len(dates)//15))], rotation=45, fontsize=7)
+    ax.set_title('Daily Case Volume')
+    ax.set_ylabel('Cases')
+    return _chart_to_image(fig)
+
+
 # ── Main report generator ─────────────────────────────────────────────────
 
 def generate_report(stats, filename, has_comparison=False):
@@ -199,23 +217,24 @@ def generate_report(stats, filename, has_comparison=False):
     doc.add_heading('1. Key Metrics', level=1)
     kpi_table = doc.add_table(rows=2, cols=7, style='Light Grid Accent 1')
     kpi_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    kpi_headers = ['Total', 'HR Cases', 'Non-HR', 'Duplicate', '3rd Party', 'SLA Rate', 'Provinces']
-    sla_str = f"{stats.get('sla_stats', {}).get('compliance_rate', '—')}%" if stats.get('sla_stats') else '—'
+    sla_str = f"{stats.get('sla_compliance', '—')}%" if stats.get('sla_compliance') else '—'
+    kpi_headers = ['Total', 'HR Cases', 'Non-HR', 'Duplicate', '3rd Party', 'SLA Rate', 'CSAT Score']
     kpi_values = [
         str(stats['total_cases']), str(stats['hr_count']), str(stats['non_hr_count']),
         str(stats['duplicate_count']), str(stats['third_party_count']),
-        sla_str, str(len(stats['province_summary'])),
+        sla_str, f"{stats.get('csat_score', '—')}/5" if stats.get('csat_score') else '—',
     ]
     for i, h in enumerate(kpi_headers):
         kpi_table.rows[0].cells[i].text = h
         kpi_table.rows[1].cells[i].text = kpi_values[i]
 
-    if has_comparison and stats.get('total_delta') is not None:
+    total_delta = stats.get('card_comparisons', {}).get('total', {}).get('vs_last')
+    if has_comparison and total_delta is not None:
         p = doc.add_paragraph()
-        arrow = 'up' if stats['total_delta'] > 0 else 'down' if stats['total_delta'] < 0 else 'flat'
+        arrow = 'up' if total_delta > 0 else 'down' if total_delta < 0 else 'flat'
         p.add_run(
-            f"MoM: {arrow} {abs(stats['total_delta'])} cases "
-            f"({stats.get('total_delta_pct', '—')}%) vs prev month {stats.get('prev_total', 0)} cases"
+            f"MoM: {arrow} {abs(total_delta)} cases "
+            f"vs prev month"
         ).font.size = Pt(9)
 
     doc.add_paragraph()
@@ -293,75 +312,37 @@ def generate_report(stats, filename, has_comparison=False):
 
     doc.add_paragraph()
 
-    # ── 5. Processing Efficiency ──
-    eff = stats.get('processing_efficiency', {})
-    if eff.get('median_sec') is not None:
-        doc.add_heading('5. Processing Efficiency', level=1)
-        eff_table = doc.add_table(rows=2, cols=5, style='Light Grid Accent 1')
-        eff_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        eff_headers = ['Median', 'P90', 'Average', '<1min Rate', '<1min Count']
-        eff_values = [
-            f"{eff['median_sec']:.0f}s" if eff.get('median_sec') else '—',
-            f"{eff['p90_sec']/3600:.1f}h" if eff.get('p90_sec') else '—',
-            f"{eff['avg_sec']/60:.1f}min" if eff.get('avg_sec') else '—',
-            f"{eff.get('lt1min_pct', 0)}%",
-            str(eff.get('lt1min_n', 0)),
-        ]
-        for i, h in enumerate(eff_headers):
-            eff_table.rows[0].cells[i].text = h
-            eff_table.rows[1].cells[i].text = eff_values[i]
+    # ── 5. Daily Trend ──
+    daily = stats.get('daily_trend', [])
+    if daily:
+        doc.add_heading('5. Daily Case Trend', level=1)
+        try:
+            dt_img = _draw_daily_trend(stats)
+            if dt_img:
+                doc.add_picture(dt_img, width=Inches(5.5))
+        except Exception:
+            pass
         doc.add_paragraph()
 
-    # ── 6. Province Analysis ──
-    doc.add_heading('6. Regional Analysis', level=1)
-    prov_table = doc.add_table(rows=1, cols=4, style='Light Grid Accent 1')
-    prov_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for i, h in enumerate(['Province', 'Total', 'Top 1', 'Top 2']):
-        prov_table.rows[0].cells[i].text = h
-    for p in stats['province_summary'][:15]:
-        row = prov_table.add_row()
-        row.cells[0].text = p['province']
-        row.cells[1].text = str(p['total'])
-        if len(p['top_types']) >= 1:
-            row.cells[2].text = f"{p['top_types'][0]['type']} ({p['top_types'][0]['count']})"
-        if len(p['top_types']) >= 2:
-            row.cells[3].text = f"{p['top_types'][1]['type']} ({p['top_types'][1]['count']})"
+    # ── 6. Resolution ──
+    res = stats.get('resolution_counts', {})
+    if res:
+        doc.add_heading('6. Resolution Methods', level=1)
+        res_table = doc.add_table(rows=1, cols=2, style='Light Grid Accent 1')
+        res_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        for i, h in enumerate(['Resolution', 'Count']):
+            res_table.rows[0].cells[i].text = h
+        for k, v in sorted(res.items(), key=lambda x: -x[1]):
+            row = res_table.add_row()
+            row.cells[0].text = k
+            row.cells[1].text = str(v)
+        doc.add_paragraph()
 
-    doc.add_paragraph()
-
-    # ── 7. Employee Source ──
-    doc.add_heading('7. Employee Source', level=1)
-    emp_table = doc.add_table(rows=1, cols=4, style='Light Grid Accent 1')
-    emp_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for i, h in enumerate(['Type', 'Count', 'Pct', 'Top Case Types']):
-        emp_table.rows[0].cells[i].text = h
-    for e in stats['employee_type_stats']:
-        row = emp_table.add_row()
-        row.cells[0].text = e['type']
-        row.cells[1].text = str(e['count'])
-        row.cells[2].text = f"{e['percentage']}%"
-        row.cells[3].text = ', '.join(f"{ct['type']}({ct['count']})" for ct in e['top_case_types'][:3])
-
-    doc.add_paragraph()
-
-    # ── 8. Team Workload ──
-    doc.add_heading('8. Team Workload', level=1)
-    owner_table = doc.add_table(rows=1, cols=3, style='Light Grid Accent 1')
-    owner_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for i, h in enumerate(['Owner', 'Cases', 'Pct']):
-        owner_table.rows[0].cells[i].text = h
-    for o in stats['owner_stats']:
-        row = owner_table.add_row()
-        row.cells[0].text = o['name']
-        row.cells[1].text = str(o['count'])
-        row.cells[2].text = f"{o['percentage']}%"
-
-    doc.add_paragraph()
-
-    # ── 9. Summary / Insight ──
-    if stats.get('insight_text'):
-        doc.add_heading('9. Monthly Insight Summary', level=1)
-        for line in stats['insight_text'].split('\n'):
+    # ── 7. Summary ──
+    summary = stats.get('monthly_summary', '')
+    if summary:
+        doc.add_heading('7. Monthly Analysis Summary', level=1)
+        for line in summary.split('\n'):
             clean = line.strip().lstrip('#').strip()
             if clean.startswith('---') or not clean:
                 continue
@@ -369,8 +350,8 @@ def generate_report(stats, filename, has_comparison=False):
                 p = doc.add_paragraph()
                 p.add_run(clean.strip('*')).font.size = Pt(8)
                 continue
-            if clean.startswith('**') or clean.startswith('###'):
-                doc.add_paragraph(clean.replace('*', '').strip(), style='List Bullet')
+            if clean.startswith('**') or clean.startswith('###') or clean.startswith('##'):
+                doc.add_paragraph(clean.replace('*', '').replace('#', '').strip(), style='List Bullet')
             else:
                 p = doc.add_paragraph(clean)
                 p.style.font.size = Pt(9)

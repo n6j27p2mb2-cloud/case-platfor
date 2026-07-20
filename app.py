@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 from dotenv import load_dotenv
 
-from analyzer import parse_excel, analyze, compute_comparison, prepare_ai_prompt
+from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, prepare_ai_prompt
 from report_gen import generate_report
 
 load_dotenv()
@@ -20,7 +20,6 @@ RESULT_DIR = Path(__file__).parent / 'results'
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULT_DIR.mkdir(exist_ok=True)
 
-# {analysis_id: {stats, filename, session_id, ...}}
 analysis_store = {}
 
 
@@ -53,50 +52,118 @@ def index():
 @app.route('/upload', methods=['POST'])
 @require_auth
 def upload():
-    file = request.files.get('file')
-    if not file or not file.filename.endswith(('.xlsx', '.xls')):
-        return redirect(url_for('index', error='请上传本月 .xlsx 或 .xls 文件'))
+    # Current month (required)
+    cur_file = request.files.get('cur_file')
+    if not cur_file or not cur_file.filename.endswith(('.xlsx', '.xls')):
+        return redirect(url_for('index', error='请上传当月报告文件'))
 
-    prev_file = request.files.get('prev_file')
-    has_prev = prev_file and prev_file.filename.endswith(('.xlsx', '.xls'))
+    # Previous months (optional, up to 3)
+    prev_files = []
+    for i in range(1, 4):
+        pf = request.files.get(f'prev_file_{i}')
+        if pf and pf.filename.endswith(('.xlsx', '.xls')):
+            prev_files.append(pf)
 
-    filepath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
-    file.save(filepath)
+    # Historical file (optional)
+    hist_file = request.files.get('hist_file')
+    historical_data = None
 
-    prev_filepath = None
-    if has_prev:
-        prev_filepath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
-        prev_file.save(prev_filepath)
+    # Name filter (optional)
+    owner_name = request.form.get('owner_name', '').strip() or None
 
+    # Save and process
     try:
-        df = parse_excel(str(filepath))
-        stats = analyze(df)
+        # Parse current month
+        cur_path = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+        cur_file.save(cur_path)
+        df, csat_df, metrics = parse_excel(str(cur_path))
+        current_stats = analyze(df, csat_df, metrics)
+        cur_path.unlink(missing_ok=True)
 
-        prev_stats = None
-        if has_prev:
-            prev_df = parse_excel(str(prev_filepath))
-            prev_stats = analyze(prev_df)
+        # Parse previous months
+        prev_stats_list = []
+        prev_filenames = []
+        for pf in prev_files:
+            ppath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+            pf.save(ppath)
+            pdf, pcsat, pmetrics = parse_excel(str(ppath))
+            pstats = analyze(pdf, pcsat, pmetrics)
+            prev_stats_list.append(pstats)
+            prev_filenames.append(pf.filename)
+            ppath.unlink(missing_ok=True)
 
-        stats = compute_comparison(stats, prev_stats)
+        # Parse historical file if provided
+        if hist_file and hist_file.filename.endswith(('.xlsx', '.xls')):
+            try:
+                from analyzer import parse_historical
+                hpath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+                hist_file.save(hpath)
+                historical_data = parse_historical(str(hpath))
+                hpath.unlink(missing_ok=True)
+            except Exception:
+                pass  # Historical is optional, ignore errors
 
+        # Compute comparisons
+        current_stats = compute_comparisons(current_stats, prev_stats_list)
+
+        # Filter by owner if name provided
+        if owner_name and prev_files:
+            # Re-parse with owner filter
+            cur_path2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+            cur_file.seek(0)
+            cur_file.save(cur_path2)
+            df2, csat_df2, metrics2 = parse_excel(str(cur_path2))
+            if 'Owner' in df2.columns:
+                df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
+            elif 'Individual' in df2.columns:
+                df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
+            current_stats_owner = analyze(df2, csat_df2, metrics2)
+
+            prev_stats_owner = []
+            for pf in prev_files:
+                pf.seek(0)
+                ppath2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+                pf.save(ppath2)
+                pdf2, pcsat2, pm2 = parse_excel(str(ppath2))
+                if 'Owner' in pdf2.columns:
+                    pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
+                elif 'Individual' in pdf2.columns:
+                    pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
+                prev_stats_owner.append(analyze(pdf2, pcsat2, pm2))
+                ppath2.unlink(missing_ok=True)
+
+            current_stats_owner = compute_comparisons(current_stats_owner, prev_stats_owner)
+            current_stats = current_stats_owner
+            cur_path2.unlink(missing_ok=True)
+        elif owner_name:
+            cur_path2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+            cur_file.seek(0)
+            cur_file.save(cur_path2)
+            df2, csat_df2, metrics2 = parse_excel(str(cur_path2))
+            if 'Owner' in df2.columns:
+                df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
+            elif 'Individual' in df2.columns:
+                df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
+            current_stats = analyze(df2, csat_df2, metrics2)
+            cur_path2.unlink(missing_ok=True)
+
+        # Generate monthly summary
+        current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
+
+        # Store
         analysis_id = uuid.uuid4().hex
         analysis_store[analysis_id] = {
-            'stats': stats,
-            'filename': file.filename,
-            'prev_filename': prev_file.filename if has_prev else None,
-            'has_comparison': has_prev,
-            'session_id': session.get('user_id', 'default'),
+            'stats': current_stats,
+            'filename': cur_file.filename,
+            'prev_filenames': prev_filenames,
+            'has_comparison': current_stats.get('has_comparison', False),
+            'owner_name': owner_name,
+            'historical': historical_data,
         }
 
-        filepath.unlink(missing_ok=True)
-        if prev_filepath:
-            prev_filepath.unlink(missing_ok=True)
-
         return redirect(url_for('dashboard', analysis_id=analysis_id))
+
     except Exception as e:
-        filepath.unlink(missing_ok=True)
-        if prev_filepath:
-            prev_filepath.unlink(missing_ok=True)
         return redirect(url_for('index', error=f'解析失败: {str(e)}'))
 
 
@@ -110,8 +177,10 @@ def dashboard(analysis_id):
                            analysis_id=analysis_id,
                            stats=data['stats'],
                            filename=data['filename'],
-                           prev_filename=data.get('prev_filename'),
-                           has_comparison=data.get('has_comparison', False))
+                           prev_filenames=data.get('prev_filenames', []),
+                           has_comparison=data.get('has_comparison', False),
+                           owner_name=data.get('owner_name', ''),
+                           historical=data.get('historical'))
 
 
 @app.route('/api/ai-analysis/<analysis_id>', methods=['POST'])
@@ -123,7 +192,7 @@ def ai_analysis(analysis_id):
 
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
-        return jsonify({'error': '未配置 ANTHROPIC_API_KEY，请在 .env 文件中设置'}), 400
+        return jsonify({'error': '未配置 ANTHROPIC_API_KEY'}), 400
 
     prompt = prepare_ai_prompt(data['stats'])
 
@@ -133,7 +202,7 @@ def ai_analysis(analysis_id):
         message = client.messages.create(
             model='claude-sonnet-4-6',
             max_tokens=2048,
-            system='你是一位资深的HR运营分析师。请基于提供的Case统计数据，给出：1) 核心发现 (3-5条) 2) 改善建议 (按优先级排序) 3) 值得关注的趋势。用中文回复，简洁直接，每条建议都要具体可执行。',
+            system='你是一位资深的HR运营分析师。请基于提供的Case统计数据，给出：1) 核心发现 (3-5条) 2) 改善建议 (按优先级排序) 3) 值得关注的趋势。用中文回复，简洁直接。',
             messages=[{'role': 'user', 'content': prompt}],
         )
         result = message.content[0].text
@@ -172,8 +241,7 @@ def download_report(analysis_id):
 
 
 if __name__ == '__main__':
-    import os as _os
-    port = int(_os.environ.get('PORT', 5050))
-    debug = _os.environ.get('RENDER') is None
+    port = int(os.environ.get('PORT', 5050))
+    debug = os.environ.get('RENDER') is None
     print(f'Case Intelligence Platform — http://127.0.0.1:{port}')
     app.run(host='127.0.0.1', port=port, debug=debug)

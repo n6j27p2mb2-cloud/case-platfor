@@ -7,202 +7,218 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f5f7fa;
-            color: #1a1a2e;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #f5f7fa; color: #1a1a2e; min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
         }
-        .container { width: 100%; max-width: 680px; padding: 40px 24px; }
+        .container { width: 100%; max-width: 720px; padding: 40px 24px; }
         .card {
-            background: #fff;
-            border-radius: 16px;
-            padding: 40px;
+            background: #fff; border-radius: 16px; padding: 36px 40px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04);
-            text-align: center;
         }
-        h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.3px; }
-        .subtitle { color: #6b7280; font-size: 14px; margin-bottom: 28px; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+        .subtitle { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
 
-        .upload-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .upload-section { margin-bottom: 20px; }
+        .upload-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #374151; }
+        .upload-section h3 .badge { font-size: 10px; padding: 2px 8px; border-radius: 8px; margin-left: 6px; }
+        .badge-required { background: #fef2f2; color: #dc2626; }
+        .badge-optional { background: #f3f4f6; color: #6b7280; }
 
+        .upload-row { display: flex; gap: 10px; flex-wrap: wrap; }
         .upload-zone {
-            border: 2px dashed #d1d5db;
-            border-radius: 12px;
-            padding: 32px 16px;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: #fafbfc;
-            position: relative;
+            flex: 1; min-width: 140px;
+            border: 2px dashed #d1d5db; border-radius: 10px;
+            padding: 20px 12px; text-align: center; cursor: pointer;
+            transition: all 0.2s; background: #fafbfc; position: relative;
         }
         .upload-zone:hover, .upload-zone.dragover { border-color: #4f46e5; background: #eef2ff; }
-        .upload-zone .icon { font-size: 32px; margin-bottom: 8px; opacity: 0.6; }
-        .upload-zone .label { font-size: 14px; font-weight: 600; color: #374151; }
-        .upload-zone .hint { color: #9ca3af; font-size: 11px; margin-top: 4px; }
-        .upload-zone .file-selected { font-size: 12px; color: #4f46e5; margin-top: 6px; display: none; }
-        .upload-zone.optional { border-style: dotted; background: #fdfdfd; }
-        .optional-badge {
-            display: inline-block;
-            background: #f3f4f6;
-            color: #6b7280;
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 8px;
-            margin-left: 4px;
-        }
+        .upload-zone .icon { font-size: 24px; margin-bottom: 4px; opacity: 0.6; }
+        .upload-zone .label { font-size: 13px; font-weight: 600; color: #374151; }
+        .upload-zone .hint { color: #9ca3af; font-size: 11px; margin-top: 2px; }
+        .upload-zone .file-selected { font-size: 11px; color: #059669; margin-top: 4px; display: none; font-weight: 500; }
+        .upload-zone.has-file { border-color: #059669; border-style: solid; background: #ecfdf5; }
+        .upload-zone.optional { border-style: dotted; }
 
         input[type="file"] { display: none; }
 
+        .name-row { margin-top: 16px; margin-bottom: 0; display: flex; align-items: center; gap: 10px; }
+        .name-row label { font-size: 13px; font-weight: 600; color: #374151; white-space: nowrap; }
+        .name-row input {
+            flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+            font-size: 13px; outline: none; transition: border-color 0.2s;
+        }
+        .name-row input:focus { border-color: #4f46e5; }
+        .name-hint { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+
         .privacy-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: #ecfdf5;
-            color: #065f46;
-            font-size: 12px;
-            padding: 6px 12px;
-            border-radius: 20px;
-            margin-bottom: 20px;
+            display: inline-flex; align-items: center; gap: 6px;
+            background: #ecfdf5; color: #065f46; font-size: 12px;
+            padding: 6px 12px; border-radius: 20px; margin-bottom: 20px;
         }
         .error-msg {
-            background: #fef2f2;
-            color: #991b1b;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            margin-bottom: 16px;
+            background: #fef2f2; color: #991b1b; padding: 12px 16px;
+            border-radius: 8px; font-size: 13px; margin-bottom: 16px;
         }
+        .btn-row { text-align: center; }
         .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 36px;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            border: none;
-            transition: all 0.15s;
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 12px 40px; border-radius: 8px; font-size: 15px;
+            font-weight: 600; cursor: pointer; border: none; transition: all 0.15s;
         }
         .btn-primary { background: #4f46e5; color: #fff; }
         .btn-primary:hover { background: #4338ca; }
         .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
-        .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 24px; text-align: left; }
-        .feature-item { font-size: 12px; color: #6b7280; padding: 8px 10px; background: #f9fafb; border-radius: 8px; }
-        .feature-item span { display: block; color: #1f2937; font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+
+        .features { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 20px; }
+        .feature-item { font-size: 11px; color: #6b7280; padding: 8px; background: #f9fafb; border-radius: 8px; text-align: center; }
+        .feature-item span { display: block; color: #1f2937; font-weight: 600; font-size: 12px; margin-bottom: 2px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="card">
             <h1>Case Intelligence Platform</h1>
-            <p class="subtitle">上传 HR Case 数据，自动生成分析报告与环比对比</p>
+            <p class="subtitle">上传 HR Ops 月度报告，自动生成 China 区域分析</p>
 
-            <div class="privacy-badge">
-                🔒 自动过滤员工隐私数据，仅展示聚合统计结果
-            </div>
+            <div class="privacy-badge">🔒 自动过滤 China 地区 · 仅展示聚合统计</div>
 
             {% if request.args.get('error') %}
             <div class="error-msg">{{ request.args.get('error') }}</div>
             {% endif %}
 
             <form action="/upload" method="POST" enctype="multipart/form-data" id="upload-form">
-                <input type="file" name="file" id="file-input" accept=".xlsx,.xls">
-                <input type="file" name="prev_file" id="prev-file-input" accept=".xlsx,.xls">
-
-                <div class="upload-row">
-                    <div class="upload-zone" id="zone-current"
-                         onclick="document.getElementById('file-input').click()">
-                        <div class="icon">📊</div>
-                        <div class="label">本月数据 *</div>
-                        <div class="hint">点击或拖拽上传</div>
-                        <div class="file-selected" id="current-name"></div>
+                <!-- Current month -->
+                <div class="upload-section">
+                    <h3>📊 本月报告 <span class="badge badge-required">必填</span></h3>
+                    <div class="upload-zone" id="zone-current" onclick="document.getElementById('cur-file').click()">
+                        <div class="icon">📄</div>
+                        <div class="label">点击或拖拽上传当月报告</div>
+                        <div class="hint">.xlsx / .xls</div>
+                        <div class="file-selected" id="cur-name"></div>
                     </div>
-                    <div class="upload-zone optional" id="zone-prev"
-                         onclick="document.getElementById('prev-file-input').click()">
-                        <div class="icon">📅</div>
-                        <div class="label">上月数据 <span class="optional-badge">可选</span></div>
-                        <div class="hint">用于环比对比</div>
-                        <div class="file-selected" id="prev-name"></div>
-                    </div>
+                    <input type="file" name="cur_file" id="cur-file" accept=".xlsx,.xls">
                 </div>
+
+                <!-- Previous 3 months -->
+                <div class="upload-section">
+                    <h3>📅 近三月对比数据 <span class="badge badge-optional">可选 · 最多3个</span></h3>
+                    <div class="upload-row">
+                        <div class="upload-zone optional" id="zone-prev1" onclick="document.getElementById('prev-file-1').click()">
+                            <div class="icon">📆</div>
+                            <div class="label">上月</div>
+                            <div class="file-selected" id="prev1-name"></div>
+                        </div>
+                        <div class="upload-zone optional" id="zone-prev2" onclick="document.getElementById('prev-file-2').click()">
+                            <div class="icon">📆</div>
+                            <div class="label">前2月</div>
+                            <div class="file-selected" id="prev2-name"></div>
+                        </div>
+                        <div class="upload-zone optional" id="zone-prev3" onclick="document.getElementById('prev-file-3').click()">
+                            <div class="icon">📆</div>
+                            <div class="label">前3月</div>
+                            <div class="file-selected" id="prev3-name"></div>
+                        </div>
+                    </div>
+                    <input type="file" name="prev_file_1" id="prev-file-1" accept=".xlsx,.xls">
+                    <input type="file" name="prev_file_2" id="prev-file-2" accept=".xlsx,.xls">
+                    <input type="file" name="prev_file_3" id="prev-file-3" accept=".xlsx,.xls">
+                </div>
+
             </form>
 
-            <button class="btn btn-primary" id="submit-btn" disabled onclick="doSubmit()">
-                开始分析
-            </button>
+            <div class="btn-row">
+                <button class="btn btn-primary" id="submit-btn" disabled onclick="doSubmit()">开始分析</button>
+            </div>
 
             <div class="features">
-                <div class="feature-item">
-                    <span>📂 分层分析</span>大类 → 子类 → 标题关键词
+                <div class="feature-item"><span>📋 四大指标</span>总量·SLA·CSAT·RR</div>
+                <div class="feature-item"><span>📂 分层下钻</span>大类→子类→热词</div>
+                <div class="feature-item"><span>📈 环比对比</span>vs上月·vs三月均值</div>
+                <div class="feature-item"><span>🔥 热点检测</span>异常涨幅自动预警</div>
+            </div>
+
+            <!-- Name filter + Historical file -->
+            <div class="name-row" style="margin-top:16px;">
+                <label>👤 个人视角</label>
+                <div style="flex:1;">
+                    <input type="text" name="owner_name" placeholder="输入姓名查看专属分析（可选）" style="width:100%;">
+                    <div class="name-hint">留空则展示 China 全局数据</div>
                 </div>
-                <div class="feature-item">
-                    <span>🔥 热点检测</span>高频 Case Type + 环比变化
+            </div>
+
+            <div class="upload-section" style="margin-top:12px;">
+                <h3>📈 历史汇总 <span class="badge badge-optional">可选</span></h3>
+                <div class="upload-zone optional" id="zone-hist" onclick="document.getElementById('hist-file').click()">
+                    <div class="icon">🗂</div>
+                    <div class="label">点击或拖拽上传历史汇总表</div>
+                    <div class="hint">用于12月趋势图 · Metrics Historical</div>
+                    <div class="file-selected" id="hist-name"></div>
                 </div>
-                <div class="feature-item">
-                    <span>📍 多维交叉</span>省份 · 员工来源 · 工作量
-                </div>
+                <input type="file" name="hist_file" id="hist-file" accept=".xlsx,.xls">
             </div>
         </div>
     </div>
 
     <script>
-        let currentFile = null;
-        let prevFile = null;
+        let curFile = false;
 
-        const zoneCurrent = document.getElementById('zone-current');
-        const zonePrev = document.getElementById('zone-prev');
-        const inputCurrent = document.getElementById('file-input');
-        const inputPrev = document.getElementById('prev-file-input');
-        const submitBtn = document.getElementById('submit-btn');
-        const currentName = document.getElementById('current-name');
-        const prevName = document.getElementById('prev-name');
-
-        function setupZone(zone, input, nameEl, isRequired) {
+        function setupZone(zone, input, nameEl) {
             zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
             zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
             zone.addEventListener('drop', e => {
-                e.preventDefault();
-                zone.classList.remove('dragover');
+                e.preventDefault(); zone.classList.remove('dragover');
                 const files = e.dataTransfer.files;
                 if (files.length > 0) {
-                    // Assign to the correct input
                     const dt = new DataTransfer();
                     dt.items.add(files[0]);
                     input.files = dt.files;
-                    updateFile(input, nameEl);
+                    updateFile(input, nameEl, zone);
                 }
             });
-            input.addEventListener('change', () => updateFile(input, nameEl));
+            input.addEventListener('change', () => updateFile(input, nameEl, zone));
         }
 
-        function updateFile(input, nameEl) {
+        function updateFile(input, nameEl, zone) {
             if (input.files.length > 0) {
                 const f = input.files[0];
-                if (!f.name.endsWith('.xlsx') && !f.name.endsWith('.xls')) return;
                 nameEl.textContent = '✓ ' + f.name;
                 nameEl.style.display = 'block';
+                zone.classList.add('has-file');
             }
             refreshState();
         }
 
         function refreshState() {
-            currentFile = inputCurrent.files.length > 0;
-            prevFile = inputPrev.files.length > 0;
-            submitBtn.disabled = !currentFile;
+            curFile = document.getElementById('cur-file').files.length > 0;
+            document.getElementById('submit-btn').disabled = !curFile;
         }
 
         function doSubmit() {
-            if (!currentFile) return;
-            submitBtn.disabled = true;
-            submitBtn.textContent = '分析中...';
+            if (!curFile) return;
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.textContent = '分析中...';
             document.getElementById('upload-form').submit();
         }
 
-        setupZone(zoneCurrent, inputCurrent, currentName, true);
-        setupZone(zonePrev, inputPrev, prevName, false);
+        setupZone(
+            document.getElementById('zone-current'),
+            document.getElementById('cur-file'),
+            document.getElementById('cur-name')
+        );
+        for (let i = 1; i <= 3; i++) {
+            setupZone(
+                document.getElementById('zone-prev' + i),
+                document.getElementById('prev-file-' + i),
+                document.getElementById('prev' + i + '-name')
+            );
+        }
+        setupZone(
+            document.getElementById('zone-hist'),
+            document.getElementById('hist-file'),
+            document.getElementById('hist-name')
+        );
     </script>
 </body>
 </html>
