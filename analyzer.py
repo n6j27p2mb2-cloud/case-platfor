@@ -275,6 +275,13 @@ def analyze(df, csat_df=None, metrics=None):
             'percentage': pct,
             'is_non_hr': str(major).startswith('Non-HR'),
             'minors': [],
+            # Comparison defaults (filled by compute_comparisons)
+            'avg_3m': None,
+            'vs_3m_diff': None,
+            'vs_3m_pct': None,
+            'prev_count': None,
+            'delta': None,
+            'delta_pct': None,
         }
         for minor, mcount in major_minors[major].most_common():
             mpct = round(mcount / total * 100, 1) if total > 0 else 0
@@ -354,12 +361,17 @@ def analyze(df, csat_df=None, metrics=None):
         'case_breakdown': case_breakdown,
         'date_range': date_range,
         # Four-card metrics
-        'csat_score': csat_score,           # 4.99 (out of 5)
-        'csat_rr': csat_rr,                 # 20.17 (%)
-        'sla_compliance': sla_compliance,    # 99.95 (%)
+        'csat_score': csat_score,
+        'csat_rr': csat_rr,
+        'sla_compliance': sla_compliance,
         'ftf_rate': m.get('ftf_rate'),
         'reopen_rate': m.get('reopen_rate'),
         'reopen_count': m.get('reopen_count'),
+        # Comparison defaults (filled by compute_comparisons)
+        'has_comparison': False,
+        'card_comparisons': {},
+        'hotspots': [],
+        'subtype_growth_ranking': [],
     }
 
     return stats
@@ -589,6 +601,12 @@ def _subtype_ranking(type_hierarchy, total, threshold=30):
                 'major': h['major'],
                 'count': m['count'],
                 'percentage': m['percentage'],
+                'avg_3m': None,
+                'vs_3m_pct': None,
+                'vs_3m_diff': None,
+                'prev_count': None,
+                'delta': None,
+                'delta_pct': None,
             })
     all_subtypes.sort(key=lambda x: -x['count'])
     return all_subtypes
