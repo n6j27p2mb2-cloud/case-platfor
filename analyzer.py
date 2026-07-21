@@ -616,28 +616,32 @@ def parse_historical(filepath):
     """Parse the 12-months historical metrics file. Returns {metric: [{month, china_value}, ...]}."""
     df = pd.read_excel(filepath, sheet_name='12months', header=None)
 
-    # The sheet has sections: Case Count (row 1-7), SLA (10-17), FTF (20-27), CSAT (30-37), CSAT RR (40-47)
+    # Section header rows: Case Count=1, SLA=11, FTF=21, CSAT=31, CSAT RR=41
+    # Each section: header, months row, then 6 data rows (AG, AP, EMEA, China, Avg, Target)
     sections = {
-        'case_count': (2, 6),
-        'sla': (12, 16),
-        'ftf': (22, 26),
-        'csat': (32, 36),
-        'csat_rr': (42, 46),
+        'case_count': 1,
+        'sla': 11,
+        'ftf': 21,
+        'csat': 31,
+        'csat_rr': 41,
     }
 
-    result = {}
-    # Months from row 1, cols 1-13
+    # Months are in row 2, cols 1-13
     months = []
     for c in range(1, 14):
-        month_val = df.iloc[1, c]
+        month_val = df.iloc[2, c]
         if pd.notna(month_val):
             months.append(str(month_val))
 
-    for section_name, (start_row, end_row) in sections.items():
+    result = {}
+    for section_name, header_row in sections.items():
         series = []
-        for r in range(start_row, end_row):
+        # Data rows: header_row+2 through header_row+7 (6 rows)
+        for r in range(header_row + 2, header_row + 8):
+            if r >= len(df):
+                break
             geo = str(df.iloc[r, 0]).strip()
-            if 'CHINA' in geo.upper() or 'China' in geo:
+            if 'CHINA' in geo.upper():
                 for c in range(1, min(14, len(df.columns))):
                     if c - 1 < len(months):
                         val = df.iloc[r, c]
