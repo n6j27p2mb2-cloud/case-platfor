@@ -30,6 +30,22 @@ def internal_error(e):
     return f'<pre style="color:red;padding:20px;">500 Internal Server Error\n\n{tb}</pre>', 500
 
 
+@app.route('/debug')
+def debug_route():
+    try:
+        from analyzer import parse_excel, analyze, parse_historical
+        import sys
+        info = [
+            f'Python: {sys.version}',
+            f'pandas: {__import__("pandas").__version__}',
+            f'openpyxl: {__import__("openpyxl").__version__}',
+            'Imports OK',
+        ]
+        return '<pre>' + '\n'.join(info) + '</pre>'
+    except Exception as e:
+        return f'<pre style="color:red;">Import Error: {e}\n{traceback.format_exc()}</pre>', 500
+
+
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
