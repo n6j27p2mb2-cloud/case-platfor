@@ -243,5 +243,5 @@ def download_report(analysis_id):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
     debug = os.environ.get('RENDER') is None
-    print(f'Case Intelligence Platform — http://127.0.0.0:{port}')
-    app.run(host='127.0.0.1', port=port, debug=debug)
+    print(f'Case Intelligence Platform — http://0.0.0.0:{port}')
+    app.run(host='0.0.0.0', port=port, debug=debug)
