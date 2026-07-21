@@ -192,13 +192,13 @@
         </div>
     </div>
 
-    <!-- Hotspot Alerts -->
-    {% if stats.hotspots %}
-    <div class="alert-bar">
-        <strong>🔥 热点预警：</strong>
-        {% for h in stats.hotspots[:6] %}
-        {{ h.direction }} <strong>{{ h.name }}</strong> {{ '%+d'|format(h.vs_3m_pct|int) }}%{% if not loop.last %} &nbsp;|&nbsp; {% endif %}
-        {% endfor %}
+    <!-- ═══════ 月度指标趋势（需上传 Historical 文件） ═══════ -->
+    {% if historical and historical.get('case_count') %}
+    <div class="section">
+        <div class="section-title">月度指标趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">近12月 · China 地区</span></div>
+        <div class="panel">
+            <canvas id="trendOverview" style="max-height:300px;"></canvas>
+        </div>
     </div>
     {% endif %}
 
@@ -617,8 +617,63 @@ new Chart(document.getElementById('resolutionChart'), {
 {% if historical %}
 const histCase = {{ historical.get('case_count', []) | tojson }};
 const histSLA = {{ historical.get('sla', []) | tojson }};
+const histFTF = {{ historical.get('ftf', []) | tojson }};
 const histCSAT = {{ historical.get('csat', []) | tojson }};
 const histRR = {{ historical.get('csat_rr', []) | tojson }};
+
+// ── Monthly overview trend (before section 一) ──
+if (histCase.length > 0) {
+    const overviewDatasets = [
+        {
+            label: 'Case 总量',
+            data: histCase.map(d => d.value),
+            borderColor: '#4f46e5',
+            backgroundColor: 'rgba(79,70,229,0.08)',
+            yAxisID: 'y',
+            tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2,
+        },
+    ];
+    const pctColors = {
+        sla: '#059669',
+        ftf: '#0891b2',
+        csat: '#7c3aed',
+        rr: '#d97706',
+    };
+    if (histSLA.length > 0) overviewDatasets.push({
+        label: 'SLA %', data: histSLA.map(d => d.value),
+        borderColor: pctColors.sla, yAxisID: 'y1',
+        tension: 0.3, pointRadius: 2, borderWidth: 1.5, borderDash: [4,2],
+    });
+    if (histFTF.length > 0) overviewDatasets.push({
+        label: 'FTF %', data: histFTF.map(d => d.value),
+        borderColor: pctColors.ftf, yAxisID: 'y1',
+        tension: 0.3, pointRadius: 2, borderWidth: 1.5, borderDash: [4,2],
+    });
+    if (histCSAT.length > 0) overviewDatasets.push({
+        label: 'CSAT %', data: histCSAT.map(d => d.value),
+        borderColor: pctColors.csat, yAxisID: 'y1',
+        tension: 0.3, pointRadius: 2, borderWidth: 1.5,
+    });
+    if (histRR.length > 0) overviewDatasets.push({
+        label: 'RR %', data: histRR.map(d => d.value),
+        borderColor: pctColors.rr, yAxisID: 'y1',
+        tension: 0.3, pointRadius: 2, borderWidth: 1.5,
+    });
+    new Chart(document.getElementById('trendOverview'), {
+        type: 'line',
+        data: { labels: histCase.map(d => d.month), datasets: overviewDatasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true, padding: 16 } } },
+            scales: {
+                y: { position: 'left', title: { display: true, text: 'Cases' }, ticks: { font: { size: 9 } } },
+                y1: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: '%' }, ticks: { font: { size: 9 } } },
+                x: { ticks: { font: { size: 8 }, maxRotation: 45 } }
+            }
+        }
+    });
+}
 
 if (histCase.length > 0) {
     new Chart(document.getElementById('trendCaseSLA'), {
