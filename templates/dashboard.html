@@ -224,7 +224,7 @@
                             <td><strong>{{ h.count }}</strong></td>
                             <td>{{ h.percentage }}%</td>
                             <td>
-                                {% if h.vs_3m_pct is not none %}
+                                {% if h.get('vs_3m_pct') is not none %}
                                 <span class="{{ 'delta-up' if h.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;">
                                     {{ '▲' if h.vs_3m_pct > 0 else '▼' }}{{ h.vs_3m_pct|abs|int }}%
                                 </span>
