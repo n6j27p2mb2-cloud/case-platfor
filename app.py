@@ -1,5 +1,6 @@
 import os
 import uuid
+import traceback
 from functools import wraps
 from pathlib import Path
 
@@ -21,6 +22,12 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 RESULT_DIR.mkdir(exist_ok=True)
 
 analysis_store = {}
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    tb = traceback.format_exc()
+    return f'<pre style="color:red;padding:20px;">500 Internal Server Error\n\n{tb}</pre>', 500
 
 
 def require_auth(f):
@@ -164,7 +171,8 @@ def upload():
         return redirect(url_for('dashboard', analysis_id=analysis_id))
 
     except Exception as e:
-        return redirect(url_for('index', error=f'解析失败: {str(e)}'))
+        tb = traceback.format_exc()
+        return f'<pre style="color:red;padding:20px;white-space:pre-wrap;">上传失败: {e}\n\n{tb}</pre>', 500
 
 
 @app.route('/dashboard/<analysis_id>')
