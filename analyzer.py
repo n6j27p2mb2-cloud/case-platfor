@@ -375,6 +375,8 @@ def compute_comparisons(current, prev_months):
     """
     if not prev_months:
         current['has_comparison'] = False
+        current['hotspots'] = []
+        current['subtype_growth_ranking'] = []
         return current
 
     current['has_comparison'] = True
