@@ -207,77 +207,86 @@
         <div class="section-title">一、Case 类型分布</div>
         <div class="grid-2">
             <div class="panel">
-                <h2>大类分布 <span class="section-desc">点击展开子类 · 右侧展示子类占比</span></h2>
+                <h2>大类分布 <span class="section-desc">点击展开子类</span></h2>
                 <canvas id="majorChart" style="max-height:380px;"></canvas>
-                <table class="type-table" style="margin-top:12px;">
-                    <thead><tr><th style="width:30%;">大类</th><th style="width:10%;">当月</th><th style="width:10%;">占比</th><th style="width:20%;">vs近三月</th><th style="width:30%;">分布</th></tr></thead>
-                    <tbody>
-                    {% set major_idx = namespace(value=0) %}
-                    {% for h in stats.type_hierarchy[:15] %}
-                        {% set major_idx.value = major_idx.value + 1 %}
-                        <tr class="major-row" onclick="toggleMinor(this)" data-major="{{ major_idx.value }}">
-                            <td>
-                                <span class="arrow">▶</span>
-                                <strong>{{ h.major }}</strong>
-                                {% if h.is_non_hr %}<span class="non-hr-tag">Non-HR</span>{% endif %}
-                            </td>
-                            <td><strong>{{ h.count }}</strong></td>
-                            <td>{{ h.percentage }}%</td>
-                            <td>
-                                {% if h.get('vs_3m_pct') is not none %}
-                                <span class="{{ 'delta-up' if h.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;">
-                                    {{ '▲' if h.vs_3m_pct > 0 else '▼' }}{{ h.vs_3m_pct|abs|int }}%
-                                </span>
-                                {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
-                            </td>
-                            <td>
-                                <div style="display:flex;align-items:center;gap:6px;">
-                                    <div style="height:5px;border-radius:3px;background:#4f46e5;opacity:0.5;width:{{ h.percentage * 2.5 }}px;min-width:2px;"></div>
-                                    <span style="font-size:10px;color:#9ca3af;">{{ h.percentage }}%</span>
-                                </div>
-                            </td>
-                        </tr>
-                        {% for m in h.minors[:8] %}
-                        <tr class="minor-row" data-parent="{{ major_idx.value }}">
-                            <td>└ {{ m.name }}</td>
-                            <td>{{ m.count }}</td>
-                            <td>{{ m.percentage }}%</td>
-                            <td colspan="2"></td>
-                        </tr>
-                        {% endfor %}
-                    {% endfor %}
-                    </tbody>
-                </table>
             </div>
             <div>
                 <div class="panel" style="margin-bottom:18px;">
-                    <h2>Case 来源构成</h2>
-                    <canvas id="originChart" style="max-height:220px;"></canvas>
-                </div>
-                <div class="panel">
                     <h2>子类下钻 <span class="section-desc" id="drill-title">点击左侧大类查看子类占比</span></h2>
                     <canvas id="drillChart" style="max-height:260px;"></canvas>
                 </div>
+                <div class="panel">
+                    <h2>Case 来源构成</h2>
+                    <canvas id="originChart" style="max-height:220px;"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="panel" style="margin-top:18px;">
+            <table class="type-table" style="width:100%;">
+                <thead><tr><th style="width:22%;">大类</th><th style="width:8%;">当月</th><th style="width:10%;">vs近三月</th><th style="width:60%;">子类展开 (占大类比 · 环比变化)</th></tr></thead>
+                <tbody>
+                {% set major_idx = namespace(value=0) %}
+                {% for h in stats.type_hierarchy[:15] %}
+                    {% set major_idx.value = major_idx.value + 1 %}
+                    <tr class="major-row" onclick="toggleMinor(this)" data-major="{{ major_idx.value }}">
+                        <td>
+                            <span class="arrow">▶</span>
+                            <strong>{{ h.major }}</strong>
+                            {% if h.is_non_hr %}<span class="non-hr-tag">Non-HR</span>{% endif %}
+                        </td>
+                        <td><strong>{{ h.count }}</strong></td>
+                        <td>
+                            {% if h.get('vs_3m_pct') is not none %}
+                            <span class="{{ 'delta-up' if h.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;">
+                                {{ '▲' if h.vs_3m_pct > 0 else '▼' }}{{ h.vs_3m_pct|abs|int }}%
+                            </span>
+                            {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
+                        </td>
+                        <td style="font-size:11px;color:#9ca3af;">
+                            {% for m in h.minors[:6] %}{{ m.name }}{% if not loop.last %} · {% endif %}{% endfor %}{% if h.minors|length > 6 %} 等{{ h.minors|length }}个子类{% endif %}
+                        </td>
+                    </tr>
+                    {% for m in h.minors[:12] %}
+                    <tr class="minor-row" data-parent="{{ major_idx.value }}">
+                        <td>└ {{ m.name }}</td>
+                        <td>{{ m.count }}</td>
+                        <td style="color:#9ca3af;font-size:11px;">{{ m.major_pct }}%</td>
+                        <td>
+                            {% if m.get('delta_pct') is not none %}
+                            <span class="{{ m.growth_color }}" style="font-weight:600;font-size:11px;">
+                                {{ '+' if m.delta_pct > 0 else '' }}{{ m.delta_pct }}%
+                            </span>
+                            {% else %}<span style="color:#d1d5db;font-size:11px;">—</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ═══════ 二、趋势 & 模式 ═══════ -->
+    <div class="section">
+        <div class="section-title">二、趋势 & 模式</div>
+        <div class="grid-2">
+            <div class="panel">
+                <h2>每日 Case 创建量 <span class="section-desc">柱=每日 · 线=7日移动均线</span></h2>
+                <canvas id="dailyChart" style="max-height:260px;"></canvas>
+            </div>
+            <div class="panel">
+                <h2>解决方式分布</h2>
+                <canvas id="resolutionChart" style="max-height:260px;"></canvas>
             </div>
         </div>
     </div>
 
-    <!-- ═══════ 二、子类详情 ═══════ -->
+    <!-- ═══════ 三、子类环比增长排名 ═══════ -->
+    {% if stats.subtype_growth_ranking %}
     <div class="section">
-        <div class="section-title">二、子类详情 <span style="font-weight:400;font-size:12px;color:#9ca3af;">门槛 ≥ 30</span></div>
-        <div class="grid-2">
-            <div class="panel">
-                <h2>当月子类排行 <span class="section-desc">Top 15</span></h2>
-                <canvas id="subtypeMonthChart" style="max-height:380px;"></canvas>
-            </div>
-            <div class="panel">
-                <h2>近三月均值排行 <span class="section-desc">Top 15</span></h2>
-                <canvas id="subtypeAvgChart" style="max-height:380px;"></canvas>
-            </div>
-        </div>
-        <div class="panel" style="margin-top:18px;">
-            <h2>子类环比增长排名 <span class="section-desc">vs 近三月均值 · 按变化幅度排序</span></h2>
-            <div style="max-height:360px;overflow-y:auto;">
+        <div class="section-title">三、子类环比增长排名 <span style="font-weight:400;font-size:12px;color:#9ca3af;">vs 近三月均值 · 按变化幅度排序</span></div>
+        <div class="panel">
+            <div style="max-height:400px;overflow-y:auto;">
             <table class="type-table">
                 <thead><tr><th>子类</th><th>大类</th><th>当月</th><th>三月均值</th><th>环比变化</th></tr></thead>
                 <tbody>
@@ -301,82 +310,7 @@
             </div>
         </div>
     </div>
-
-    <!-- ═══════ 三、趋势 & 模式 ═══════ -->
-    {% if historical %}
-    <div class="section">
-        <div class="section-title">三、12 月趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">来自 Historical 汇总表</span></div>
-        <div class="grid-2">
-            <div class="panel">
-                <h2>Case 总量 & SLA</h2>
-                <canvas id="trendCaseSLA" style="max-height:260px;"></canvas>
-            </div>
-            <div class="panel">
-                <h2>CSAT 满意度 & 回复率</h2>
-                <canvas id="trendCSATRR" style="max-height:260px;"></canvas>
-            </div>
-        </div>
-    </div>
     {% endif %}
-
-    <!-- ═══════ 每日趋势 + 解决方式 ═══════ -->
-    <div class="section">
-        <div class="section-title">{{ '四' if historical else '三' }}、趋势 & 模式</div>
-        <div class="grid-2">
-            <div class="panel">
-                <h2>每日 Case 创建量 <span class="section-desc">柱=每日 · 线=7日移动均线</span></h2>
-                <canvas id="dailyChart" style="max-height:260px;"></canvas>
-            </div>
-            <div class="panel">
-                <h2>解决方式分布</h2>
-                <canvas id="resolutionChart" style="max-height:260px;"></canvas>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════ 热点热词 ═══════ -->
-    <div class="section">
-        <div class="section-title">{{ '五' if historical else '四' }}、热点热词 <span style="font-weight:400;font-size:12px;color:#9ca3af;">从 Title 提取 · 门槛 ≥ 40 · 已过滤泛词及地名</span></div>
-        <div class="grid-2">
-            <div class="panel">
-                <h2>全局热词 <span class="section-desc">Count ≥ 40</span></h2>
-                <div class="hot-kw-list">
-                    {% if stats.hot_keywords %}
-                    {% for kw in stats.hot_keywords %}
-                    <span class="hot-kw-pill" style="background:{{ ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#f472b6','#fb923c','#e11d48','#0891b2','#8b5cf6'][loop.index0] }};">
-                        {{ kw.keyword }} <span style="opacity:0.8;font-size:10px;">{{ kw.count }}</span>
-                    </span>
-                    {% endfor %}
-                    {% else %}
-                    <span style="color:#9ca3af;font-size:12px;">无满足门槛的热词</span>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="panel">
-                <h2>各大类热词 <span class="section-desc">Count ≥ 20 · Top 5 大类</span></h2>
-                <div style="max-height:300px;overflow-y:auto;">
-                {% for major, kws in stats.major_hot_keywords.items() %}
-                    {% if loop.index <= 5 %}
-                    <div style="margin-bottom:10px;">
-                        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">{{ major }}</div>
-                        <div class="hot-kw-list">
-                            {% if kws %}
-                            {% for kw in kws[:6] %}
-                            <span class="hot-kw-pill" style="background:{{ ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#3b82f6','#06b6d4'][loop.index0] }};font-size:11px;">
-                                {{ kw.keyword }} <span style="opacity:0.8;font-size:10px;">{{ kw.count }}</span>
-                            </span>
-                            {% endfor %}
-                            {% else %}
-                            <span style="color:#9ca3af;font-size:11px;">无满足门槛的热词</span>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- ═══════ 月度分析摘要 ═══════ -->
     {% if stats.monthly_summary %}
@@ -487,64 +421,6 @@ function renderDrill(majorItem) {
 
 // Default: show first HR major
 if (firstHR) renderDrill(firstHR);
-
-// ── Subtype: Current Month Top 15 ──
-const subtypeData = {{ stats.subtype_ranking[:15] | tojson }};
-const subtypeSortedByAvg = [...subtypeData]
-    .filter(d => d.avg_3m !== undefined)
-    .sort((a, b) => b.avg_3m - a.avg_3m)
-    .slice(0, 15);
-
-// Build a fixed color map: same subtype = same color in both charts
-const allSubtypeNames = new Set([
-    ...subtypeData.map(d => d.subtype),
-    ...subtypeSortedByAvg.map(d => d.subtype)
-]);
-const subtypeColorMap = {};
-Array.from(allSubtypeNames).forEach((name, i) => {
-    subtypeColorMap[name] = BAR_COLORS[i % BAR_COLORS.length];
-});
-
-new Chart(document.getElementById('subtypeMonthChart'), {
-    type: 'bar',
-    data: {
-        labels: subtypeData.map(d => d.subtype.length > 18 ? d.subtype.slice(0,16)+'..' : d.subtype),
-        datasets: [{
-            label: '当月量',
-            data: subtypeData.map(d => d.count),
-            backgroundColor: subtypeData.map(d => subtypeColorMap[d.subtype]),
-            borderRadius: 4,
-        }]
-    },
-    options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.raw} 条 (${subtypeData[ctx.dataIndex].percentage}%)` } } },
-        scales: { y: { ticks: { font: { size: 10 }, autoSkip: false } }, x: { ticks: { font: { size: 10 } } } }
-    }
-});
-
-// ── Subtype: 3-Month Average Top 15 ──
-if (subtypeSortedByAvg.length > 0) {
-    new Chart(document.getElementById('subtypeAvgChart'), {
-        type: 'bar',
-        data: {
-            labels: subtypeSortedByAvg.map(d => d.subtype.length > 18 ? d.subtype.slice(0,16)+'..' : d.subtype),
-            datasets: [{
-                label: '近三月均值',
-                data: subtypeSortedByAvg.map(d => d.avg_3m),
-                backgroundColor: subtypeSortedByAvg.map(d => subtypeColorMap[d.subtype]),
-                borderRadius: 4,
-            }]
-        },
-        options: {
-            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` 近三月均值: ${ctx.raw} 条` } } },
-            scales: { y: { ticks: { font: { size: 10 }, autoSkip: false } }, x: { ticks: { font: { size: 10 } } } }
-        }
-    });
-} else {
-    document.getElementById('subtypeAvgChart').parentElement.innerHTML += '<p style="color:#9ca3af;font-size:12px;text-align:center;padding:40px;">上传近三月数据以查看对比</p>';
-}
 
 // ── Daily Trend (bar + 7-day MA line) ──
 const dailyData = {{ stats.daily_trend | tojson }};
@@ -675,77 +551,6 @@ if (histCase.length > 0) {
     });
 }
 
-if (histCase.length > 0) {
-    new Chart(document.getElementById('trendCaseSLA'), {
-        type: 'line',
-        data: {
-            labels: histCase.map(d => d.month),
-            datasets: [
-                {
-                    label: 'Case 总量',
-                    data: histCase.map(d => d.value),
-                    borderColor: '#4f46e5',
-                    backgroundColor: 'rgba(79,70,229,0.05)',
-                    yAxisID: 'y',
-                    tension: 0.3, fill: true, pointRadius: 4,
-                },
-                ...(histSLA.length > 0 ? [{
-                    label: 'SLA %',
-                    data: histSLA.map(d => d.value),
-                    borderColor: '#059669',
-                    backgroundColor: 'transparent',
-                    yAxisID: 'y1',
-                    tension: 0.3, pointRadius: 3, borderDash: [5,3],
-                }] : []),
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true } } },
-            scales: {
-                y: { position: 'left', title: { display: true, text: 'Cases' }, ticks: { font: { size: 9 } } },
-                y1: { position: 'right', min: 90, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: 'SLA %' }, ticks: { font: { size: 9 } } },
-                x: { ticks: { font: { size: 8 }, maxRotation: 45 } }
-            }
-        }
-    });
-}
-
-if (histCSAT.length > 0 && histRR.length > 0) {
-    new Chart(document.getElementById('trendCSATRR'), {
-        type: 'line',
-        data: {
-            labels: histCSAT.map(d => d.month),
-            datasets: [
-                {
-                    label: 'CSAT 满意度 %',
-                    data: histCSAT.map(d => d.value),
-                    borderColor: '#7c3aed',
-                    backgroundColor: 'rgba(124,58,237,0.05)',
-                    yAxisID: 'y',
-                    tension: 0.3, fill: true, pointRadius: 4,
-                },
-                {
-                    label: 'CSAT 回复率 %',
-                    data: histRR.map(d => d.value),
-                    borderColor: '#d97706',
-                    backgroundColor: 'transparent',
-                    yAxisID: 'y1',
-                    tension: 0.3, pointRadius: 3, borderDash: [5,3],
-                },
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true } } },
-            scales: {
-                y: { position: 'left', min: 95, max: 100, title: { display: true, text: 'CSAT %' }, ticks: { font: { size: 9 } } },
-                y1: { position: 'right', min: 15, max: 30, grid: { drawOnChartArea: false }, title: { display: true, text: 'RR %' }, ticks: { font: { size: 9 } } },
-                x: { ticks: { font: { size: 8 }, maxRotation: 45 } }
-            }
-        }
-    });
-}
 {% endif %}
 </script>
 </body>

@@ -289,6 +289,7 @@ def analyze(df, csat_df=None, metrics=None):
                 'name': minor,
                 'count': mcount,
                 'percentage': mpct,
+                'major_pct': round(mcount / count * 100, 1) if count > 0 else 0,
             })
         type_hierarchy.append(entry)
 
@@ -457,6 +458,32 @@ def compute_comparisons(current, prev_months):
             s['prev_count'] = lm_subs[key]
             s['delta'] = s['count'] - s['prev_count']
             s['delta_pct'] = round(s['delta'] / s['prev_count'] * 100, 1) if s['prev_count'] > 0 else None
+
+    # ── Minor-level comparison within each major ──
+    all_minors_with_growth = []
+    for h in current['type_hierarchy']:
+        major_name = h['major']
+        lm_minors = {}
+        for lh in last_month.get('type_hierarchy', []):
+            if lh['major'] == major_name:
+                lm_minors = {m['name']: m['count'] for m in lh.get('minors', [])}
+                break
+        for m in h['minors']:
+            if m['name'] in lm_minors:
+                m['prev_count'] = lm_minors[m['name']]
+                m['delta'] = m['count'] - m['prev_count']
+                m['delta_pct'] = round(m['delta'] / m['prev_count'] * 100, 1) if m['prev_count'] > 0 else None
+            if m.get('delta_pct') is not None:
+                all_minors_with_growth.append(m)
+    # Rank all minors by growth and assign colors
+    all_minors_with_growth.sort(key=lambda x: -x['delta_pct'])
+    for i, m in enumerate(all_minors_with_growth):
+        if i < 10:
+            m['growth_color'] = 'delta-up'
+        elif i < 20:
+            m['growth_color'] = 'delta-warn'
+        else:
+            m['growth_color'] = ''
 
     # ── Hotspot detection (两层逻辑) ──
     current['hotspots'] = _detect_hotspots(current, min_base=30, min_growth_pct=20)
