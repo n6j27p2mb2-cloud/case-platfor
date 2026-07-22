@@ -211,13 +211,9 @@
                 <canvas id="majorChart" style="max-height:380px;"></canvas>
             </div>
             <div>
-                <div class="panel" style="margin-bottom:18px;">
-                    <h2>子类下钻 <span class="section-desc" id="drill-title">点击左侧大类查看子类占比</span></h2>
-                    <canvas id="drillChart" style="max-height:260px;"></canvas>
-                </div>
                 <div class="panel">
-                    <h2>Case 来源构成</h2>
-                    <canvas id="originChart" style="max-height:220px;"></canvas>
+                    <h2>子类下钻 <span class="section-desc" id="drill-title">点击柱状图或表格查看子类</span></h2>
+                    <canvas id="drillChart" style="max-height:380px;"></canvas>
                 </div>
             </div>
         </div>
@@ -269,15 +265,9 @@
     <!-- ═══════ 二、趋势 & 模式 ═══════ -->
     <div class="section">
         <div class="section-title">二、趋势 & 模式</div>
-        <div class="grid-2">
-            <div class="panel">
-                <h2>每日 Case 创建量 <span class="section-desc">柱=每日 · 线=7日移动均线</span></h2>
-                <canvas id="dailyChart" style="max-height:260px;"></canvas>
-            </div>
-            <div class="panel">
-                <h2>解决方式分布</h2>
-                <canvas id="resolutionChart" style="max-height:260px;"></canvas>
-            </div>
+        <div class="panel">
+            <h2>每日 Case 创建量 <span class="section-desc">柱=每日 · 线=7日移动均线</span></h2>
+            <canvas id="dailyChart" style="max-height:260px;"></canvas>
         </div>
     </div>
 
@@ -307,10 +297,23 @@
                 {% endfor %}
                 </tbody>
             </table>
+    </div>
+    {% endif %}
+
+    <!-- ═══════ Case 来源 & 解决方式 ═══════ -->
+    <div class="section">
+        <div class="section-title">{{ '四' if stats.subtype_growth_ranking else '三' }}、Case 来源 & 解决方式</div>
+        <div class="grid-2">
+            <div class="panel">
+                <h2>Case 来源构成</h2>
+                <canvas id="originChart" style="max-height:260px;"></canvas>
+            </div>
+            <div class="panel">
+                <h2>解决方式分布</h2>
+                <canvas id="resolutionChart" style="max-height:260px;"></canvas>
             </div>
         </div>
     </div>
-    {% endif %}
 
     <!-- ═══════ 月度分析摘要 ═══════ -->
     {% if stats.monthly_summary %}
@@ -327,10 +330,30 @@ const ANALYSIS_ID = '{{ analysis_id }}';
 const COLORS = ['#4f46e5','#7c3aed','#a855f7','#c084fc','#e879f9','#f472b6','#fb7185','#f87171','#fb923c','#fbbf24','#a3e635','#4ade80','#2dd4bf','#22d3ee','#38bdf8','#60a5fa'];
 const BAR_COLORS = ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#a78bfa','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#84cc16','#f97316','#14b8a6','#8b5cf6'];
 
+function openMajorRow(idx) {
+    // Close all open rows first
+    document.querySelectorAll('.major-row.open').forEach(r => {
+        r.classList.remove('open');
+        document.querySelectorAll(`.minor-row[data-parent="${r.dataset.major}"]`).forEach(m => m.classList.remove('show'));
+    });
+    // Open target row
+    const row = document.querySelector(`.major-row[data-major="${idx}"]`);
+    if (!row) return;
+    row.classList.add('open');
+    document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.add('show'));
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function toggleMinor(row) {
-    row.classList.toggle('open');
     const idx = row.dataset.major;
-    document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.toggle('show'));
+    const wasOpen = row.classList.contains('open');
+    // Close all
+    document.querySelectorAll('.major-row.open').forEach(r => r.classList.remove('open'));
+    document.querySelectorAll('.minor-row.show').forEach(r => r.classList.remove('show'));
+    if (wasOpen) return; // Just closed, don't re-open
+    // Open this one
+    row.classList.add('open');
+    document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.add('show'));
     // Update drill-down chart
     const majorName = row.querySelector('strong').textContent.trim();
     const majorItem = allMajorData.find(d => d.major === majorName);
@@ -355,6 +378,14 @@ new Chart(majorCtx, {
     },
     options: {
         indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        onClick: (event, elements) => {
+            if (elements.length > 0) {
+                const idx = elements[0].index;
+                const major = majorData[idx];
+                if (major && major.minors.length > 0) renderDrill(major);
+                openMajorRow(idx + 1);
+            }
+        },
         plugins: {
             legend: { display: false },
             tooltip: {
