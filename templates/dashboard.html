@@ -219,7 +219,7 @@
         </div>
         <div class="panel" style="margin-top:18px;">
             <table class="type-table" style="width:100%;">
-                <thead><tr><th style="width:22%;">大类</th><th style="width:8%;">当月</th><th style="width:10%;">vs近三月</th><th style="width:60%;">子类展开 (占大类比 · 环比变化)</th></tr></thead>
+                <thead><tr><th style="width:20%;">大类</th><th style="width:7%;">当月</th><th style="width:10%;">vs近三月</th><th style="width:10%;">占大类比</th><th style="width:10%;">环比变化</th><th style="width:43%;">子类预览</th></tr></thead>
                 <tbody>
                 {% set major_idx = namespace(value=0) %}
                 {% for h in stats.type_hierarchy[:15] %}
@@ -238,7 +238,7 @@
                             </span>
                             {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                         </td>
-                        <td style="font-size:11px;color:#9ca3af;">
+                        <td colspan="3" style="color:#9ca3af;font-size:11px;">
                             {% for m in h.minors[:6] %}{{ m.name }}{% if not loop.last %} · {% endif %}{% endfor %}{% if h.minors|length > 6 %} 等{{ h.minors|length }}个子类{% endif %}
                         </td>
                     </tr>
@@ -246,6 +246,7 @@
                     <tr class="minor-row" data-parent="{{ major_idx.value }}">
                         <td>└ {{ m.name }}</td>
                         <td>{{ m.count }}</td>
+                        <td style="color:#9ca3af;font-size:11px;">—</td>
                         <td style="color:#9ca3af;font-size:11px;">{{ m.major_pct }}%</td>
                         <td>
                             {% if m.get('delta_pct') is not none %}
@@ -254,6 +255,7 @@
                             </span>
                             {% else %}<span style="color:#d1d5db;font-size:11px;">—</span>{% endif %}
                         </td>
+                        <td></td>
                     </tr>
                     {% endfor %}
                 {% endfor %}
@@ -305,15 +307,9 @@
     <!-- ═══════ Case 来源 & 解决方式 ═══════ -->
     <div class="section">
         <div class="section-title">{{ '四' if stats.subtype_growth_ranking else '三' }}、Case 来源 & 解决方式</div>
-        <div class="grid-2">
-            <div class="panel">
-                <h2>Case 来源构成</h2>
-                <canvas id="originChart" style="max-height:260px;"></canvas>
-            </div>
-            <div class="panel">
-                <h2>解决方式分布</h2>
-                <canvas id="resolutionChart" style="max-height:260px;"></canvas>
-            </div>
+        <div class="panel">
+            <h2>Case 来源构成</h2>
+            <canvas id="originChart" style="max-height:260px;"></canvas>
         </div>
     </div>
 
@@ -332,27 +328,13 @@ const ANALYSIS_ID = '{{ analysis_id }}';
 const COLORS = ['#4f46e5','#7c3aed','#a855f7','#c084fc','#e879f9','#f472b6','#fb7185','#f87171','#fb923c','#fbbf24','#a3e635','#4ade80','#2dd4bf','#22d3ee','#38bdf8','#60a5fa'];
 const BAR_COLORS = ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#a78bfa','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#84cc16','#f97316','#14b8a6','#8b5cf6'];
 
-function openMajorRow(idx) {
-    // Close all open rows first
-    document.querySelectorAll('.major-row.open').forEach(r => {
-        r.classList.remove('open');
-        document.querySelectorAll(`.minor-row[data-parent="${r.dataset.major}"]`).forEach(m => m.classList.remove('show'));
-    });
-    // Open target row
-    const row = document.querySelector(`.major-row[data-major="${idx}"]`);
-    if (!row) return;
-    row.classList.add('open');
-    document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.add('show'));
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
 function toggleMinor(row) {
     const idx = row.dataset.major;
     const wasOpen = row.classList.contains('open');
     // Close all
     document.querySelectorAll('.major-row.open').forEach(r => r.classList.remove('open'));
     document.querySelectorAll('.minor-row.show').forEach(r => r.classList.remove('show'));
-    if (wasOpen) return; // Just closed, don't re-open
+    if (wasOpen) return;
     // Open this one
     row.classList.add('open');
     document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.add('show'));
@@ -362,9 +344,10 @@ function toggleMinor(row) {
     if (majorItem && majorItem.minors.length > 0) renderDrill(majorItem);
 }
 
-// ── Major Type Chart (bar only) ──
+// ── Major Type Chart (bar + 近三月均值 dots) ──
 const majorData = {{ stats.type_hierarchy[:12] | tojson }};
 const majorCtx = document.getElementById('majorChart').getContext('2d');
+const hasAvg3m = majorData.some(d => d.avg_3m != null);
 new Chart(majorCtx, {
     type: 'bar',
     data: {
@@ -375,7 +358,20 @@ new Chart(majorCtx, {
                 data: majorData.map(d => d.count),
                 backgroundColor: majorData.map((d, i) => d.is_non_hr ? '#fcd34d' : BAR_COLORS[i % BAR_COLORS.length]),
                 borderRadius: 4,
+                order: 2,
             },
+            ...(hasAvg3m ? [{
+                label: '近三月均值',
+                data: majorData.map(d => d.avg_3m),
+                type: 'line',
+                showLine: false,
+                pointRadius: 6,
+                pointStyle: 'rectRounded',
+                pointBackgroundColor: '#dc2626',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                order: 1,
+            }] : []),
         ]
     },
     options: {
@@ -385,15 +381,18 @@ new Chart(majorCtx, {
                 const idx = elements[0].index;
                 const major = majorData[idx];
                 if (major && major.minors.length > 0) renderDrill(major);
-                openMajorRow(idx + 1);
             }
         },
         plugins: {
-            legend: { display: false },
+            legend: { display: hasAvg3m, position: 'top', labels: { font: { size: 9 }, usePointStyle: true, padding: 8 } },
             tooltip: {
                 callbacks: {
                     label: function(ctx) {
-                        return ` ${ctx.raw} 条`;
+                        const d = majorData[ctx.dataIndex];
+                        let txt = `${d.major}: ${d.count} 条`;
+                        if (d.avg_3m != null) txt += ` | 近三月均值: ${d.avg_3m}`;
+                        if (d.vs_3m_pct != null) txt += ` | 环比: ${d.vs_3m_pct > 0 ? '+' : ''}${d.vs_3m_pct}%`;
+                        return txt;
                     }
                 }
             }
@@ -433,7 +432,7 @@ function renderDrill(majorItem) {
     drillChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: minors.map(m => m.name.length > 14 ? m.name.slice(0,13)+'..' : m.name),
+            labels: minors.map(m => m.name),
             datasets: [{
                 label: '数量',
                 data: minors.map(m => m.count),
@@ -503,25 +502,6 @@ new Chart(document.getElementById('dailyChart'), {
     }
 });
 
-// ── Resolution Donut ──
-const resData = {{ stats.resolution_counts | tojson }};
-const resEntries = Object.entries(resData);
-const resTotal = resEntries.reduce((s,e) => s+e[1], 0);
-new Chart(document.getElementById('resolutionChart'), {
-    type: 'doughnut',
-    data: {
-        labels: resEntries.map(e => e[0]),
-        datasets: [{ data: resEntries.map(e => e[1]), backgroundColor: ['#4f46e5','#9ca3af','#f87171','#fb923c'], borderWidth: 0 }]
-    },
-    options: {
-        responsive: true,
-        plugins: {
-            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/resTotal*100)}%)` } },
-            legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 12 } }
-        }
-    }
-});
-
 // ── 12-month historical trend charts ──
 {% if historical %}
 const histCase = {{ historical.get('case_count', []) | tojson }};
@@ -543,8 +523,8 @@ if (histCase.length > 0) {
         },
     ];
     const pctColors = {
-        sla: '#059669',
-        ftf: '#0891b2',
+        sla: '#0891b2',
+        ftf: '#e11d48',
         csat: '#7c3aed',
         rr: '#d97706',
     };
