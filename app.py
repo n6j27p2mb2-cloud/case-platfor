@@ -14,7 +14,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', uuid.uuid4().hex)
-SITE_PASSWORD = os.environ.get('SITE_PASSWORD', '0617')
+SITE_PASSWORD = os.environ.get('SITE_PASSWORD', '0000')
 
 UPLOAD_DIR = Path(__file__).parent / 'uploads'
 RESULT_DIR = Path(__file__).parent / 'results'
