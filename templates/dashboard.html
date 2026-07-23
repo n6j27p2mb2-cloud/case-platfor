@@ -429,22 +429,51 @@ function renderDrill(majorItem) {
     document.getElementById('drill-title').textContent = majorItem.major + ' · 子类占比';
     if (drillChart) drillChart.destroy();
     const minors = majorItem.minors.slice(0, 12);
+    const n = minors.length;
+    const hasAvg = minors.some(m => m.avg_3m != null);
+    // Gradient: same hue, decreasing opacity from top
+    const drillColors = minors.map((_, i) => {
+        const alpha = 1 - (i / Math.max(n - 1, 1)) * 0.6;
+        return `rgba(79,70,229,${alpha.toFixed(2)})`;
+    });
     drillChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: minors.map(m => m.name),
-            datasets: [{
-                label: '数量',
-                data: minors.map(m => m.count),
-                backgroundColor: minors.map((_, i) => BAR_COLORS[i % BAR_COLORS.length]),
-                borderRadius: 4,
-            }]
+            datasets: [
+                {
+                    label: '当月',
+                    data: minors.map(m => m.count),
+                    backgroundColor: drillColors,
+                    borderRadius: 4,
+                    order: 2,
+                },
+                ...(hasAvg ? [{
+                    label: '近三月均值',
+                    data: minors.map(m => m.avg_3m),
+                    type: 'line',
+                    showLine: false,
+                    pointRadius: 6,
+                    pointStyle: 'rectRounded',
+                    pointBackgroundColor: '#dc2626',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    order: 1,
+                }] : []),
+            ]
         },
         options: {
             indexAxis: 'y', responsive: true, maintainAspectRatio: false,
             plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: ctx => ` ${ctx.raw} 条 (${minors[ctx.dataIndex].percentage}%)` } }
+                legend: { display: hasAvg, position: 'top', labels: { font: { size: 9 }, usePointStyle: true } },
+                tooltip: { callbacks: {
+                    label: function(ctx) {
+                        const d = minors[ctx.dataIndex];
+                        let txt = `${d.name}: ${d.count} 条 (${d.major_pct}%)`;
+                        if (d.avg_3m != null) txt += ` | 近三月均值: ${d.avg_3m}`;
+                        return txt;
+                    }
+                }}
             },
             scales: { y: { ticks: { font: { size: 10 }, autoSkip: false } }, x: { ticks: { font: { size: 9 } } } }
         }

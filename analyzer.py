@@ -461,6 +461,13 @@ def compute_comparisons(current, prev_months):
 
     # ── Minor-level comparison within each major ──
     all_minors_with_growth = []
+    # Build 3-month avg lookup for minors
+    prev_minor_counts = defaultdict(list)
+    for pm in prev_months:
+        for ph in pm.get('type_hierarchy', []):
+            for pmn in ph.get('minors', []):
+                prev_minor_counts[(ph['major'], pmn['name'])].append(pmn['count'])
+
     for h in current['type_hierarchy']:
         major_name = h['major']
         lm_minors = {}
@@ -469,10 +476,15 @@ def compute_comparisons(current, prev_months):
                 lm_minors = {m['name']: m['count'] for m in lh.get('minors', [])}
                 break
         for m in h['minors']:
+            # vs last month
             if m['name'] in lm_minors:
                 m['prev_count'] = lm_minors[m['name']]
                 m['delta'] = m['count'] - m['prev_count']
                 m['delta_pct'] = round(m['delta'] / m['prev_count'] * 100, 1) if m['prev_count'] > 0 else None
+            # vs 3-month avg
+            prev_counts = prev_minor_counts.get((major_name, m['name']), [])
+            if prev_counts:
+                m['avg_3m'] = round(sum(prev_counts) / len(prev_counts), 1)
             if m.get('delta_pct') is not None:
                 all_minors_with_growth.append(m)
     # Rank all minors by growth and assign colors
