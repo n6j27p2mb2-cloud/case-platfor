@@ -1,14 +1,16 @@
 import os
+import sys
 import uuid
+import json
+import subprocess
 import traceback
-import threading
 from functools import wraps
 from pathlib import Path
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 from dotenv import load_dotenv
 
-from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, prepare_ai_prompt
+from analyzer import generate_monthly_summary, prepare_ai_prompt
 from report_gen import generate_report
 
 load_dotenv()
@@ -91,100 +93,81 @@ def upload():
     owner_name = request.form.get('owner_name', '').strip() or None
 
     task_id = uuid.uuid4().hex
+    result_dir = Path(__file__).parent / 'results'
+    result_dir.mkdir(exist_ok=True)
 
-    # Save all files to disk first (request files won't be accessible in thread)
+    # Save all files
     cur_path = UPLOAD_DIR / f'{task_id}_cur.xlsx'
-    cur_file.save(cur_path)
+    cur_file.save(str(cur_path))
 
     prev_paths = []
     prev_filenames = []
     for i, pf in enumerate(prev_files):
         pp = UPLOAD_DIR / f'{task_id}_prev{i}.xlsx'
-        pf.save(pp)
+        pf.save(str(pp))
         prev_paths.append(str(pp))
         prev_filenames.append(pf.filename)
 
     hist_path = None
     if hist_file and hist_file.filename.endswith(('.xlsx', '.xls')):
         hist_path = UPLOAD_DIR / f'{task_id}_hist.xlsx'
-        hist_file.save(hist_path)
+        hist_file.save(str(hist_path))
+
+    # Build subprocess command
+    output_path = result_dir / f'{task_id}.json'
+    cmd = [sys.executable, str(Path(__file__).parent / 'process_task.py'),
+           str(output_path), str(cur_path)]
+    for pp in prev_paths:
+        cmd.append(str(pp))
+    if hist_path:
+        cmd += ['--hist', str(hist_path)]
+    if owner_name:
+        cmd += ['--owner', owner_name]
 
     processing_status[task_id] = {'status': 'processing'}
 
-    def do_analyze():
-        try:
-            from analyzer import parse_historical
-            # Parse current month
-            df, csat_df, metrics = parse_excel(str(cur_path))
-            current_stats = analyze(df, csat_df, metrics)
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # Parse previous months
-            prev_stats_list = []
-            for pp in prev_paths:
-                pdf, pcsat, pmetrics = parse_excel(pp)
-                prev_stats_list.append(analyze(pdf, pcsat, pmetrics))
+    # Cleanup callback — schedule a thread just for cleanup after subprocess
+    def wait_and_cleanup():
+        import time
+        # Wait for subprocess by polling output file
+        for _ in range(120):  # max 10 minutes
+            if output_path.exists():
+                break
+            time.sleep(2)
+        # Clean up temp files
+        cur_path.unlink(missing_ok=True)
+        for pp in prev_paths:
+            Path(pp).unlink(missing_ok=True)
+        if hist_path:
+            hist_path.unlink(missing_ok=True)
 
-            # Parse historical
-            historical_data = None
-            if hist_path:
-                try:
-                    historical_data = parse_historical(str(hist_path))
-                except Exception:
-                    pass
+    import threading
+    threading.Thread(target=wait_and_cleanup, daemon=True).start()
 
-            # Comparisons
-            current_stats = compute_comparisons(current_stats, prev_stats_list)
-
-            # Owner filter (re-parse from saved file if needed)
-            if owner_name:
-                df2, csat_df2, metrics2 = parse_excel(str(cur_path))
-                if 'Owner' in df2.columns:
-                    df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
-                elif 'Individual' in df2.columns:
-                    df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
-                current_stats = analyze(df2, csat_df2, metrics2)
-                if prev_paths:
-                    prev_owner = []
-                    for pp in prev_paths:
-                        pdf2, pcsat2, pm2 = parse_excel(pp)
-                        if 'Owner' in pdf2.columns:
-                            pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
-                        elif 'Individual' in pdf2.columns:
-                            pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
-                        prev_owner.append(analyze(pdf2, pcsat2, pm2))
-                    current_stats = compute_comparisons(current_stats, prev_owner)
-
-            # Summary
-            current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
-
-            # Store
-            analysis_id = uuid.uuid4().hex
-            analysis_store[analysis_id] = {
-                'stats': current_stats,
-                'filename': cur_file.filename,
-                'prev_filenames': prev_filenames,
-                'has_comparison': current_stats.get('has_comparison', False),
-                'owner_name': owner_name,
-                'historical': historical_data,
-            }
-            processing_status[task_id] = {'status': 'done', 'analysis_id': analysis_id}
-        except Exception as e:
-            processing_status[task_id] = {'status': 'error', 'error': f'{e}\n\n{traceback.format_exc()}'}
-        finally:
-            # Cleanup
-            cur_path.unlink(missing_ok=True)
-            for pp in prev_paths:
-                Path(pp).unlink(missing_ok=True)
-            if hist_path:
-                hist_path.unlink(missing_ok=True)
-
-    threading.Thread(target=do_analyze, daemon=True).start()
     return render_template('processing.html', task_id=task_id)
 
 
 @app.route('/api/status/<task_id>')
 @require_auth
 def check_status(task_id):
+    st = processing_status.get(task_id)
+    if st and st['status'] == 'processing':
+        result_dir = Path(__file__).parent / 'results'
+        result_file = result_dir / f'{task_id}.json'
+        if result_file.exists():
+            try:
+                data = json.loads(result_file.read_text(encoding='utf-8'))
+                if 'error' in data:
+                    processing_status[task_id] = {'status': 'error', 'error': data['error']}
+                else:
+                    analysis_id = uuid.uuid4().hex
+                    analysis_store[analysis_id] = data
+                    processing_status[task_id] = {'status': 'done', 'analysis_id': analysis_id}
+                result_file.unlink(missing_ok=True)
+            except (json.JSONDecodeError, OSError):
+                pass  # still processing or partial write
     st = processing_status.get(task_id, {'status': 'not_found'})
     return jsonify(st)
 
