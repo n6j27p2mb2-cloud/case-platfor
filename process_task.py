@@ -3,7 +3,7 @@ import sys
 import json
 import traceback
 from pathlib import Path
-from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary
+from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, generate_analysis_line
 
 def main():
     # Args: output_json_path cur_xlsx [prev_xlsx...] [--hist hist_xlsx] [--owner name]
@@ -28,15 +28,15 @@ def main():
 
     try:
         # Parse current month
-        df, csat_df, metrics = parse_excel(str(cur_path))
-        current_stats = analyze(df, csat_df, metrics)
+        df, csat_df, metrics, csat_quality_raw = parse_excel(str(cur_path))
+        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
 
         # Parse previous months
         prev_stats_list = []
         prev_filenames = [p.name for p in prev_paths]
         for pp in prev_paths:
-            pdf, pcsat, pmetrics = parse_excel(str(pp))
-            prev_stats_list.append(analyze(pdf, pcsat, pmetrics))
+            pdf, pcsat, pmetrics, pquality = parse_excel(str(pp))
+            prev_stats_list.append(analyze(pdf, pcsat, pmetrics, pquality))
 
         # Parse historical
         historical_data = None
@@ -52,25 +52,36 @@ def main():
 
         # Owner filter
         if owner_name:
-            df2, csat_df2, metrics2 = parse_excel(str(cur_path))
+            df2, csat_df2, metrics2, quality2 = parse_excel(str(cur_path))
             if 'Owner' in df2.columns:
                 df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
             elif 'Individual' in df2.columns:
                 df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
-            current_stats = analyze(df2, csat_df2, metrics2)
+            current_stats = analyze(df2, csat_df2, metrics2, quality2)
             if prev_paths:
                 prev_owner = []
                 for pp in prev_paths:
-                    pdf2, pcsat2, pm2 = parse_excel(str(pp))
+                    pdf2, pcsat2, pm2, pq2 = parse_excel(str(pp))
                     if 'Owner' in pdf2.columns:
                         pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
                     elif 'Individual' in pdf2.columns:
                         pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
-                    prev_owner.append(analyze(pdf2, pcsat2, pm2))
+                    prev_owner.append(analyze(pdf2, pcsat2, pm2, pq2))
                 current_stats = compute_comparisons(current_stats, prev_owner)
 
         # Summary
         current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
+        # Analysis line
+        last_month_label = ''
+        try:
+            from datetime import datetime
+            end_str = current_stats.get('date_range', {}).get('end', '')
+            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
+            prev_month = end_dt.replace(day=1) - __import__('datetime').timedelta(days=1)
+            last_month_label = prev_month.strftime("%b'%y")
+        except Exception:
+            pass
+        current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, last_month_label)
 
         # Serialize — only keep JSON-safe fields
         result = {

@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 from dotenv import load_dotenv
 
-from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, prepare_ai_prompt
+from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, prepare_ai_prompt, generate_analysis_line
 from report_gen import generate_report
 
 load_dotenv()
@@ -94,8 +94,8 @@ def upload():
         # Parse current month
         cur_path = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
         cur_file.save(str(cur_path))
-        df, csat_df, metrics = parse_excel(str(cur_path))
-        current_stats = analyze(df, csat_df, metrics)
+        df, csat_df, metrics, csat_quality_raw = parse_excel(str(cur_path))
+        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
         cur_path.unlink(missing_ok=True)
 
         # Parse previous months
@@ -103,8 +103,8 @@ def upload():
         for pf in prev_files:
             ppath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
             pf.save(str(ppath))
-            pdf, pcsat, pmetrics = parse_excel(str(ppath))
-            prev_stats_list.append(analyze(pdf, pcsat, pmetrics))
+            pdf, pcsat, pmetrics, pquality = parse_excel(str(ppath))
+            prev_stats_list.append(analyze(pdf, pcsat, pmetrics, pquality))
             ppath.unlink(missing_ok=True)
 
         # Parse historical
@@ -127,30 +127,41 @@ def upload():
             cur_path2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
             cur_file.seek(0)
             cur_file.save(str(cur_path2))
-            df2, csat_df2, metrics2 = parse_excel(str(cur_path2))
+            df2, csat_df2, metrics2, quality2 = parse_excel(str(cur_path2))
             if 'Owner' in df2.columns:
                 df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
             elif 'Individual' in df2.columns:
                 df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
-            current_stats = analyze(df2, csat_df2, metrics2)
+            current_stats = analyze(df2, csat_df2, metrics2, quality2)
             if prev_files:
                 prev_owner = []
                 for pf in prev_files:
                     pf.seek(0)
                     ppath2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
                     pf.save(str(ppath2))
-                    pdf2, pcsat2, pm2 = parse_excel(str(ppath2))
+                    pdf2, pcsat2, pm2, pq2 = parse_excel(str(ppath2))
                     if 'Owner' in pdf2.columns:
                         pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
                     elif 'Individual' in pdf2.columns:
                         pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
-                    prev_owner.append(analyze(pdf2, pcsat2, pm2))
+                    prev_owner.append(analyze(pdf2, pcsat2, pm2, pq2))
                     ppath2.unlink(missing_ok=True)
                 current_stats = compute_comparisons(current_stats, prev_owner)
             cur_path2.unlink(missing_ok=True)
 
         # Summary
         current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
+        # Analysis line
+        last_month_label = ''
+        try:
+            from datetime import datetime
+            end_str = current_stats.get('date_range', {}).get('end', '')
+            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
+            prev_month = end_dt.replace(day=1) - __import__('datetime').timedelta(days=1)
+            last_month_label = prev_month.strftime("%b'%y")
+        except Exception:
+            pass
+        current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, last_month_label)
 
         # Store
         analysis_id = uuid.uuid4().hex

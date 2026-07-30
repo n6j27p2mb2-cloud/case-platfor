@@ -135,12 +135,25 @@ def parse_excel(filepath):
 
     # ── CSAT sheet ──
     csat_df = None
+    csat_quality_raw = None
     if 'CSAT' in xl.sheet_names:
         csat_df = pd.read_excel(xl, 'CSAT')
         csat_drop = [c for c in PII_DROP if c in csat_df.columns]
         csat_df = csat_df.drop(columns=csat_drop, errors='ignore')
         if 'GEO' in csat_df.columns:
             csat_df = csat_df[csat_df['GEO'] == 'China'].copy()
+        # Extract quality metric columns (case-insensitive match)
+        quality_cols = {}
+        for col in csat_df.columns:
+            col_lower = str(col).strip().lower()
+            if 'interaction' in col_lower:
+                quality_cols['interaction'] = col
+            elif 'pers.serv' in col_lower or 'pers serv' in col_lower or 'personal' in col_lower:
+                quality_cols['pers_serv'] = col
+            elif 'comm' in col_lower and 'communication' in col_lower:
+                quality_cols['comm'] = col
+        if quality_cols:
+            csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
 
     # ── Metrics sheet (for KPIs) ──
     metrics = {}
@@ -148,7 +161,7 @@ def parse_excel(filepath):
         metrics_df = pd.read_excel(xl, 'Metrics', header=None)
         metrics = _parse_metrics_sheet(metrics_df, df, csat_df)
 
-    return df, csat_df, metrics
+    return df, csat_df, metrics, csat_quality_raw
 
 
 def _classify_resolution(res_str):
@@ -246,7 +259,7 @@ def _parse_metrics_sheet(metrics_df, hrops_df, csat_df):
 
 # ── Analyze ─────────────────────────────────────────────────────────────────────
 
-def analyze(df, csat_df=None, metrics=None):
+def analyze(df, csat_df=None, metrics=None, csat_quality_raw=None):
     """Analyze China-only data and return stats dict."""
     total = len(df)
 
@@ -327,6 +340,28 @@ def analyze(df, csat_df=None, metrics=None):
         '系统重复': dup_count,
     }
 
+    # ── CSAT Quality Metrics (from CSAT sheet columns) ──
+    csat_quality = {}
+    if csat_quality_raw is not None:
+        qdf = csat_quality_raw['df']
+        cols = csat_quality_raw['cols']
+        quality_labels = {
+            'interaction': 'Solution Quality',
+            'pers_serv': 'Service Professionalism',
+            'comm': 'Clear Communication',
+        }
+        for key, col_name in cols.items():
+            if col_name in qdf.columns:
+                vals = qdf[col_name].dropna()
+                if len(vals) > 0:
+                    avg_val = vals.mean()
+                    pct = round(avg_val / 5 * 100, 1)
+                    csat_quality[quality_labels[key]] = {
+                        'avg': round(avg_val, 2),
+                        'pct': pct,
+                        'count': len(vals),
+                    }
+
     # ── KPI metrics ──
     m = metrics or {}
     csat_score = m.get('csat_score')
@@ -368,6 +403,7 @@ def analyze(df, csat_df=None, metrics=None):
         'ftf_rate': m.get('ftf_rate'),
         'reopen_rate': m.get('reopen_rate'),
         'reopen_count': m.get('reopen_count'),
+        'csat_quality': csat_quality,
         # Comparison defaults (filled by compute_comparisons)
         'has_comparison': False,
         'card_comparisons': {},
@@ -485,17 +521,23 @@ def compute_comparisons(current, prev_months):
             prev_counts = prev_minor_counts.get((major_name, m['name']), [])
             if prev_counts:
                 m['avg_3m'] = round(sum(prev_counts) / len(prev_counts), 1)
-            if m.get('delta_pct') is not None:
+                m['vs_3m_diff'] = round(m['count'] - m['avg_3m'], 1)
+                m['vs_3m_pct'] = round((m['count'] - m['avg_3m']) / m['avg_3m'] * 100, 1) if m['avg_3m'] > 0 else None
+            if m.get('vs_3m_pct') is not None:
                 all_minors_with_growth.append(m)
-    # Rank all minors by growth and assign colors
-    all_minors_with_growth.sort(key=lambda x: -x['delta_pct'])
-    for i, m in enumerate(all_minors_with_growth):
-        if i < 10:
-            m['growth_color'] = 'delta-up'
-        elif i < 20:
-            m['growth_color'] = 'delta-warn'
-        else:
-            m['growth_color'] = ''
+    # Rank minors by |vs_3m_pct|, only those with |vs_3m_diff| > 30 qualify
+    all_minors_with_growth.sort(key=lambda x: -abs(x['vs_3m_pct']))
+    rank_counter = 0
+    for m in all_minors_with_growth:
+        m['growth_rank'] = None
+        m['growth_tag'] = None
+        if m.get('vs_3m_diff') is not None and abs(m['vs_3m_diff']) > 30:
+            rank_counter += 1
+            if rank_counter <= 20:
+                m['growth_rank'] = rank_counter
+                m['growth_tag'] = 'red' if rank_counter <= 10 else 'orange'
+        elif m.get('vs_3m_pct') is not None and abs(m['vs_3m_pct']) >= 50:
+            m['growth_tag'] = 'anomaly'
 
     # ── Hotspot detection (两层逻辑) ──
     current['hotspots'] = _detect_hotspots(current, min_base=30, min_growth_pct=20)
@@ -598,6 +640,32 @@ def generate_monthly_summary(stats):
 
     lines.append(f'\n---\n*由 Case Intelligence Platform 自动生成*')
     return '\n'.join(lines)
+
+
+def generate_analysis_line(stats, last_month_label=''):
+    """Generate the one-line analysis summary displayed below the trend chart."""
+    total = stats['total_cases']
+    cards = stats.get('card_comparisons', {})
+    tc = cards.get('total', {})
+
+    parts = [f'Total case amount: {total}']
+
+    vs_last = tc.get('vs_last')
+    vs_last_pct = tc.get('vs_last_pct')
+    if vs_last is not None and vs_last_pct is not None:
+        direction = 'increase' if vs_last > 0 else 'decrease'
+        lm = f' ({last_month_label})' if last_month_label else ''
+        parts.append(f' with {direction} of {abs(vs_last)} cases compared to last month{lm} ({vs_last_pct:+.1f}%)')
+
+    sla = stats.get('sla_compliance', 0) or 0
+    ftf = stats.get('ftf_rate', 0) or 0
+    csat = stats.get('csat_score', 0) or 0
+    rr = stats.get('csat_rr', 0) or 0
+    reopen = stats.get('reopen_rate', 0) or 0
+
+    parts.append(f'. SLA performance is {sla}%, FCF result is {ftf}%, survey result is {csat}%, CSAT RR is {rr}% and reopen rate is {reopen}%.')
+
+    return ''.join(parts)
 
 
 def prepare_ai_prompt(stats):

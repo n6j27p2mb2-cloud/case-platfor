@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard — Case Intelligence Platform</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f7fa; color: #1a1a2e; }
@@ -15,19 +16,25 @@
         .header h1 { font-size: 17px; font-weight: 700; }
         .header .meta { font-size: 11px; color: #9ca3af; margin-left: 10px; }
         .header a { color: #4f46e5; text-decoration: none; font-size: 13px; }
-        .main { max-width: 1340px; margin: 0 auto; padding: 20px; }
+        .main { max-width: 1400px; margin: 0 auto; padding: 20px; }
 
-        /* KPI Cards */
+        /* KPI Cards — left-right layout */
         .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
-        .kpi { background: #fff; border-radius: 12px; padding: 18px 22px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
-        .kpi .klabel { font-size: 11px; color: #9ca3af; letter-spacing: 0.3px; margin-bottom: 2px; }
-        .kpi .kvalue { font-size: 30px; font-weight: 700; }
-        .kpi .kcomps { margin-top: 8px; display: flex; gap: 16px; }
-        .kpi .kcomp { font-size: 11px; }
+        .kpi {
+            background: #fff; border-radius: 12px; padding: 16px 20px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .kpi .kpi-left { }
+        .kpi .klabel { font-size: 10px; color: #9ca3af; letter-spacing: 0.3px; margin-bottom: 4px; }
+        .kpi .kvalue { font-size: 28px; font-weight: 700; line-height: 1.1; }
+        .kpi .kpi-right { text-align: right; display: flex; flex-direction: column; gap: 4px; }
+        .kpi .kcomp { font-size: 10px; white-space: nowrap; }
         .kpi .kcomp .kcomp-label { color: #9ca3af; }
         .delta-up { color: #dc2626; }
         .delta-down { color: #059669; }
         .delta-warn { color: #d97706; }
+        .delta-anomaly { color: #e11d48; background: #fff1f2; padding: 1px 4px; border-radius: 3px; }
 
         /* Alert bar */
         .alert-bar {
@@ -42,25 +49,45 @@
             padding-left: 12px; border-left: 3px solid #4f46e5;
         }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
         .panel { background: #fff; border-radius: 12px; padding: 20px 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
         .panel h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         .panel .section-desc { font-size: 11px; color: #9ca3af; font-weight: 400; margin-left: 4px; }
 
+        /* Analysis summary line */
+        .analysis-line {
+            text-align: center; font-size: 12px; color: #4b5563;
+            background: #f9fafb; border-radius: 8px; padding: 10px 18px; margin-top: 10px;
+            line-height: 1.6;
+        }
+
         /* Tables */
         .type-table { width: 100%; border-collapse: collapse; }
-        .type-table th, .type-table td { text-align: left; padding: 5px 10px; font-size: 12px; }
-        .type-table th { color: #9ca3af; font-weight: 500; border-bottom: 1px solid #e5e7eb; font-size: 10px; }
+        .type-table th, .type-table td { text-align: left; padding: 5px 8px; font-size: 11px; }
+        .type-table th { color: #9ca3af; font-weight: 500; border-bottom: 1px solid #e5e7eb; font-size: 10px; white-space: nowrap; }
         .type-table td { border-bottom: 1px solid #f3f4f6; }
         .type-table .major-row { cursor: pointer; transition: background 0.1s; }
         .type-table .major-row:hover { background: #f9fafb; }
         .type-table .major-row .arrow { display: inline-block; width: 16px; font-size: 10px; color: #9ca3af; transition: transform 0.15s; }
-        .type-table .major-row.open .arrow { transform: rotate(90deg); }
+        .type-table .major-row.expanded .arrow { transform: rotate(90deg); }
         .type-table .minor-row { display: none; background: #fafbfc; }
         .type-table .minor-row.show { display: table-row; }
-        .type-table .minor-row td { padding-left: 30px; font-size: 11px; color: #4b5563; }
+        .type-table .minor-row td { padding-left: 28px; font-size: 10px; color: #4b5563; }
         .non-hr-tag { font-size: 10px; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 8px; }
-        .hot-tag { font-size: 10px; background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 8px; margin-left: 4px; }
+        .rank-badge {
+            display: inline-block; min-width: 18px; text-align: center;
+            font-size: 10px; font-weight: 600; border-radius: 9px; padding: 1px 5px;
+        }
+        .rank-red { background: #fee2e2; color: #991b1b; }
+        .rank-orange { background: #fff7ed; color: #c2410c; }
+        .rank-anomaly { background: #fdf2f8; color: #be185d; }
+
+        /* Table toolbar */
+        .table-toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
+        .table-toolbar button {
+            font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid #d1d5db;
+            background: #fff; color: #6b7280; cursor: pointer; transition: all 0.1s;
+        }
+        .table-toolbar button:hover { background: #f3f4f6; color: #374151; }
 
         /* Hot keywords */
         .hot-kw-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -70,7 +97,7 @@
             font-size: 12px; font-weight: 500; color: #fff;
         }
 
-        /* Export */
+        /* Buttons */
         .btn {
             display: inline-flex; align-items: center; gap: 6px;
             padding: 9px 18px; border-radius: 7px; font-size: 13px; font-weight: 500;
@@ -80,6 +107,8 @@
         .btn-primary:hover { background: #4338ca; }
         .btn-green { background: #059669; color: #fff; }
         .btn-green:hover { background: #047857; }
+        .btn-outline { background: #fff; color: #4f46e5; border: 1px solid #4f46e5; }
+        .btn-outline:hover { background: #f5f3ff; }
 
         .summary-box {
             background: #f9fafb; border-radius: 8px; padding: 14px 18px;
@@ -103,44 +132,48 @@
 
 <div class="main">
 
-    <!-- ═══════ KPI Cards ═══════ -->
+    <!-- ═══════ KPI Cards — left: value, right: vs上月 / vs近三月 ═══════ -->
     <div class="kpi-row">
         {% set cc = stats.get('card_comparisons', {}) %}
         <!-- Case Total -->
         <div class="kpi">
-            <div class="klabel">📋 Case 总量</div>
-            <div class="kvalue">{{ stats.total_cases }}</div>
-            <div class="kcomps">
+            <div class="kpi-left">
+                <div class="klabel">📋 Case 总量</div>
+                <div class="kvalue">{{ stats.total_cases }}</div>
+            </div>
+            <div class="kpi-right">
                 {% if cc.total %}
                 <div class="kcomp">
-                    <span class="kcomp-label">vs上月</span>
+                    <span class="kcomp-label">vs上月 </span>
                     {% if cc.total.vs_last is not none %}
                     <span class="{{ 'delta-up' if cc.total.vs_last > 0 else 'delta-down' }}">{{ '+' if cc.total.vs_last > 0 else '' }}{{ cc.total.vs_last }} ({{ '+' if cc.total.vs_last_pct and cc.total.vs_last_pct > 0 else '' }}{{ cc.total.vs_last_pct }}%)</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
                 <div class="kcomp">
-                    <span class="kcomp-label">vs近三月</span>
+                    <span class="kcomp-label">vs近三月 </span>
                     {% if cc.total.vs_3m_diff is not none %}
                     <span class="{{ 'delta-up' if cc.total.vs_3m_diff > 0 else 'delta-down' }}">{{ '+' if cc.total.vs_3m_diff > 0 else '' }}{{ cc.total.vs_3m_diff|int }} ({{ '+' if cc.total.vs_3m_pct and cc.total.vs_3m_pct > 0 else '' }}{{ cc.total.vs_3m_pct }}%)</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
-                {% else %}<span style="color:#9ca3af;font-size:11px;">上传近三月数据以查看对比</span>{% endif %}
+                {% else %}<span style="color:#9ca3af;font-size:10px;">上传近三月数据</span>{% endif %}
             </div>
         </div>
         <!-- SLA -->
         <div class="kpi">
-            <div class="klabel">✅ SLA 达标率</div>
-            <div class="kvalue" style="color:{{ '#059669' if stats.sla_compliance and stats.sla_compliance >= 96 else '#dc2626' }};">{{ stats.sla_compliance if stats.sla_compliance else '—' }}%</div>
-            <div class="kcomps">
+            <div class="kpi-left">
+                <div class="klabel">✅ SLA 达标率</div>
+                <div class="kvalue" style="color:{{ '#059669' if stats.sla_compliance and stats.sla_compliance >= 96 else '#dc2626' }};">{{ stats.sla_compliance if stats.sla_compliance else '—' }}%</div>
+            </div>
+            <div class="kpi-right">
                 {% if cc.sla %}
                 <div class="kcomp">
-                    <span class="kcomp-label">vs上月</span>
+                    <span class="kcomp-label">vs上月 </span>
                     {% if cc.sla.vs_last is not none %}
                     <span class="{{ 'delta-up' if cc.sla.vs_last > 0 else 'delta-down' }}">{{ '+' if cc.sla.vs_last > 0 else '' }}{{ cc.sla.vs_last }}pp</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
                 <div class="kcomp">
-                    <span class="kcomp-label">vs近三月</span>
+                    <span class="kcomp-label">vs近三月 </span>
                     {% if cc.sla.vs_3m_diff is not none %}
                     <span class="{{ 'delta-up' if cc.sla.vs_3m_diff > 0 else 'delta-down' }}">{{ '+' if cc.sla.vs_3m_diff > 0 else '' }}{{ cc.sla.vs_3m_diff }}pp</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
@@ -150,18 +183,20 @@
         </div>
         <!-- CSAT -->
         <div class="kpi">
-            <div class="klabel">⭐ CSAT 满意度</div>
-            <div class="kvalue">{{ stats.csat_score if stats.csat_score else '—' }}/5</div>
-            <div class="kcomps">
+            <div class="kpi-left">
+                <div class="klabel">⭐ CSAT 满意度</div>
+                <div class="kvalue">{{ stats.csat_score if stats.csat_score else '—' }}/5</div>
+            </div>
+            <div class="kpi-right">
                 {% if cc.csat_score %}
                 <div class="kcomp">
-                    <span class="kcomp-label">vs上月</span>
+                    <span class="kcomp-label">vs上月 </span>
                     {% if cc.csat_score.vs_last is not none %}
                     <span class="{{ 'delta-up' if cc.csat_score.vs_last > 0 else 'delta-down' }}">{{ '+' if cc.csat_score.vs_last > 0 else '' }}{{ cc.csat_score.vs_last }}</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
                 <div class="kcomp">
-                    <span class="kcomp-label">vs近三月</span>
+                    <span class="kcomp-label">vs近三月 </span>
                     {% if cc.csat_score.vs_3m_diff is not none %}
                     <span class="{{ 'delta-up' if cc.csat_score.vs_3m_diff > 0 else 'delta-down' }}">{{ '+' if cc.csat_score.vs_3m_diff > 0 else '' }}{{ cc.csat_score.vs_3m_diff }}</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
@@ -171,18 +206,20 @@
         </div>
         <!-- RR -->
         <div class="kpi">
-            <div class="klabel">📬 CSAT 回复率</div>
-            <div class="kvalue" style="color:{{ '#059669' if stats.csat_rr and stats.csat_rr >= 20 else '#d97706' }};">{{ stats.csat_rr if stats.csat_rr else '—' }}%</div>
-            <div class="kcomps">
+            <div class="kpi-left">
+                <div class="klabel">📬 CSAT 回复率</div>
+                <div class="kvalue" style="color:{{ '#059669' if stats.csat_rr and stats.csat_rr >= 20 else '#d97706' }};">{{ stats.csat_rr if stats.csat_rr else '—' }}%</div>
+            </div>
+            <div class="kpi-right">
                 {% if cc.rr %}
                 <div class="kcomp">
-                    <span class="kcomp-label">vs上月</span>
+                    <span class="kcomp-label">vs上月 </span>
                     {% if cc.rr.vs_last is not none %}
                     <span class="{{ 'delta-up' if cc.rr.vs_last > 0 else 'delta-down' }}">{{ '+' if cc.rr.vs_last > 0 else '' }}{{ cc.rr.vs_last }}pp</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
                 <div class="kcomp">
-                    <span class="kcomp-label">vs近三月</span>
+                    <span class="kcomp-label">vs近三月 </span>
                     {% if cc.rr.vs_3m_diff is not none %}
                     <span class="{{ 'delta-up' if cc.rr.vs_3m_diff > 0 else 'delta-warn' }}">{{ '+' if cc.rr.vs_3m_diff > 0 else '' }}{{ cc.rr.vs_3m_diff }}pp</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
@@ -192,23 +229,60 @@
         </div>
     </div>
 
-    <!-- ═══════ 月度指标趋势（需上传 Historical 文件） ═══════ -->
+    <!-- Hotspots alert -->
+    {% if stats.hotspots %}
+    <div class="alert-bar">
+        ⚠️ 热点关注：
+        {% for h in stats.hotspots[:5] %}
+        <strong>{{ h.name }}</strong> {{ h.direction }}{{ h.vs_3m_pct|abs|int }}%（{{ h.count }} vs {{ h.avg_3m }}）{% if not loop.last %} · {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- ═══════ 月度指标趋势 — widened, bar+lines ═══════ -->
     {% if historical and historical.get('case_count') %}
     <div class="section">
         <div class="section-title">月度指标趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">近12月 · China 地区</span></div>
         <div class="panel">
-            <canvas id="trendOverview" style="max-height:300px;"></canvas>
+            <canvas id="trendOverview" style="height:340px;"></canvas>
+            {% if stats.analysis_summary_line %}
+            <div class="analysis-line">{{ stats.analysis_summary_line }}</div>
+            {% endif %}
         </div>
     </div>
     {% endif %}
 
-    <!-- ═══════ 一、Case 类型分布 ═══════ -->
+    <!-- Analysis line standalone (when no historical chart) -->
+    {% if (not historical or not historical.get('case_count')) and stats.analysis_summary_line %}
+    <div class="analysis-line" style="margin-bottom:18px;">{{ stats.analysis_summary_line }}</div>
+    {% endif %}
+
+    <!-- ═══════ Case 来源 & Solution Quality ═══════ -->
     <div class="section">
-        <div class="section-title">一、Case 类型分布</div>
+        <div class="section-title">Case 来源 & 服务质量</div>
+        <div class="grid-2">
+            <div class="panel">
+                <h2>Case 来源构成</h2>
+                <canvas id="originChart" style="max-height:280px;"></canvas>
+            </div>
+            <div class="panel">
+                <h2>Solution Quality <span class="section-desc">CSAT 分项评分 · China</span></h2>
+                {% if stats.csat_quality %}
+                <canvas id="qualityChart" style="max-height:280px;"></canvas>
+                {% else %}
+                <div style="text-align:center;color:#9ca3af;padding:40px;">CSAT 质量数据暂不可用<br><small>请确认 CSAT sheet 中包含 Interaction / Pers.Serv. / Comm. 列</small></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ Case 类型分布 ═══════ -->
+    <div class="section">
+        <div class="section-title">Case 类型分布</div>
         <div class="grid-2">
             <div class="panel">
                 <h2>大类分布 <span class="section-desc">点击展开子类</span></h2>
-                <canvas id="majorChart" style="max-height:380px;"></canvas>
+                <canvas id="majorChart" style="max-height:400px;"></canvas>
             </div>
             <div>
                 <div class="panel">
@@ -217,20 +291,32 @@
                 </div>
             </div>
         </div>
+        <!-- Expandable Table -->
         <div class="panel" style="margin-top:18px;">
+            <div class="table-toolbar">
+                <button onclick="expandAll()">📂 全部展开</button>
+                <button onclick="collapseAll()">📁 全部收起</button>
+            </div>
             <table class="type-table" style="width:100%;">
-                <thead><tr><th style="width:20%;">大类</th><th style="width:7%;">当月</th><th style="width:10%;">vs近三月</th><th style="width:10%;">占大类比</th><th style="width:10%;">环比变化</th><th style="width:43%;">子类预览</th></tr></thead>
+                <thead><tr>
+                    <th style="width:22%;">大类</th>
+                    <th style="width:8%;">当月</th>
+                    <th style="width:8%;">占总比</th>
+                    <th style="width:10%;">vs近三月</th>
+                    <th style="width:10%;">环比变化</th>
+                </tr></thead>
                 <tbody>
                 {% set major_idx = namespace(value=0) %}
                 {% for h in stats.type_hierarchy[:15] %}
                     {% set major_idx.value = major_idx.value + 1 %}
-                    <tr class="major-row" onclick="toggleMinor(this)" data-major="{{ major_idx.value }}">
+                    <tr class="major-row" data-major="{{ major_idx.value }}" onclick="toggleMinor(this)">
                         <td>
                             <span class="arrow">▶</span>
                             <strong>{{ h.major }}</strong>
                             {% if h.is_non_hr %}<span class="non-hr-tag">Non-HR</span>{% endif %}
                         </td>
                         <td><strong>{{ h.count }}</strong></td>
+                        <td style="color:#6b7280;">{{ h.percentage }}%</td>
                         <td>
                             {% if h.get('vs_3m_pct') is not none %}
                             <span class="{{ 'delta-up' if h.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;">
@@ -238,24 +324,39 @@
                             </span>
                             {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                         </td>
-                        <td colspan="3" style="color:#9ca3af;font-size:11px;">
-                            {% for m in h.minors[:6] %}{{ m.name }}{% if not loop.last %} · {% endif %}{% endfor %}{% if h.minors|length > 6 %} 等{{ h.minors|length }}个子类{% endif %}
+                        <td>
+                            {% if h.get('delta_pct') is not none %}
+                            <span class="{{ 'delta-up' if h.delta_pct > 0 else 'delta-down' }}" style="font-weight:600;font-size:10px;">
+                                {{ '+' if h.delta_pct > 0 else '' }}{{ h.delta_pct }}%
+                            </span>
+                            {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                         </td>
                     </tr>
-                    {% for m in h.minors[:12] %}
+                    {% for m in h.minors[:15] %}
                     <tr class="minor-row" data-parent="{{ major_idx.value }}">
                         <td>└ {{ m.name }}</td>
                         <td>{{ m.count }}</td>
-                        <td style="color:#9ca3af;font-size:11px;">—</td>
-                        <td style="color:#9ca3af;font-size:11px;">{{ m.major_pct }}%</td>
+                        <td style="color:#6b7280;font-size:10px;">{{ m.major_pct }}% / {{ m.percentage }}%</td>
+                        <td>
+                            {% if m.get('vs_3m_pct') is not none %}
+                            <span class="{{ 'delta-up' if m.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;font-size:10px;">
+                                {{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%
+                            </span>
+                            {% else %}<span style="color:#d1d5db;font-size:10px;">—</span>{% endif %}
+                        </td>
                         <td>
                             {% if m.get('delta_pct') is not none %}
-                            <span class="{{ m.growth_color }}" style="font-weight:600;font-size:11px;">
+                            <span class="{{ 'delta-up' if m.delta_pct > 0 else 'delta-down' }}" style="font-weight:600;font-size:10px;">
                                 {{ '+' if m.delta_pct > 0 else '' }}{{ m.delta_pct }}%
                             </span>
-                            {% else %}<span style="color:#d1d5db;font-size:11px;">—</span>{% endif %}
+                            {% else %}<span style="color:#d1d5db;font-size:10px;">—</span>{% endif %}
+                            {% if m.get('growth_rank') %}
+                            <span class="rank-badge {{ 'rank-red' if m.growth_tag == 'red' else 'rank-orange' }}">#{{ m.growth_rank }}</span>
+                            {% endif %}
+                            {% if m.get('growth_tag') == 'anomaly' %}
+                            <span class="rank-badge rank-anomaly" title="高百分比低绝对值异常">!</span>
+                            {% endif %}
                         </td>
-                        <td></td>
                     </tr>
                     {% endfor %}
                 {% endfor %}
@@ -264,60 +365,22 @@
         </div>
     </div>
 
-    <!-- ═══════ 二、子类环比增长排名 ═══════ -->
-    {% if stats.subtype_growth_ranking %}
+    <!-- ═══════ 趋势 & 模式 ═══════ -->
     <div class="section">
-        <div class="section-title">二、子类环比增长排名 <span style="font-weight:400;font-size:12px;color:#9ca3af;">vs 近三月均值 · 按变化幅度排序</span></div>
-        <div class="panel">
-            <div style="max-height:400px;overflow-y:auto;">
-            <table class="type-table">
-                <thead><tr><th>子类</th><th>大类</th><th>当月</th><th>三月均值</th><th>环比变化</th></tr></thead>
-                <tbody>
-                {% for s in stats.subtype_growth_ranking[:25] %}
-                    <tr>
-                        <td><strong>{{ s.subtype[:25] }}</strong></td>
-                        <td style="font-size:10px;color:#6b7280;">{{ s.major[:18] }}</td>
-                        <td>{{ s.count }}</td>
-                        <td style="color:#9ca3af;">{{ s.avg_3m|int if s.avg_3m else '—' }}</td>
-                        <td>
-                            {% if s.vs_3m_pct is not none %}
-                            <span class="{{ 'delta-up' if s.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;">
-                                {{ '+' if s.vs_3m_pct > 0 else '' }}{{ s.vs_3m_pct }}%
-                            </span>
-                            {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- ═══════ 三、趋势 & 模式 ═══════ -->
-    <div class="section">
-        <div class="section-title">三、趋势 & 模式</div>
+        <div class="section-title">趋势 & 模式</div>
         <div class="panel">
             <h2>每日 Case 创建量 <span class="section-desc">柱=每日 · 线=7日移动均线</span></h2>
             <canvas id="dailyChart" style="max-height:260px;"></canvas>
         </div>
     </div>
 
-    <!-- ═══════ Case 来源 & 解决方式 ═══════ -->
-    <div class="section">
-        <div class="section-title">{{ '四' if stats.subtype_growth_ranking else '三' }}、Case 来源 & 解决方式</div>
-        <div class="panel">
-            <h2>Case 来源构成</h2>
-            <canvas id="originChart" style="max-height:260px;"></canvas>
-        </div>
-    </div>
-
     <!-- ═══════ 月度分析摘要 ═══════ -->
     {% if stats.monthly_summary %}
-    <div class="section">
-        <div class="section-title">📝 月度分析摘要</div>
-        <div class="summary-box">{{ stats.monthly_summary }}</div>
+    <div class="section" id="summary-section">
+        <div class="section-title">📝 月度分析摘要
+            <button class="btn btn-outline" style="margin-left:12px;font-size:10px;padding:4px 10px;" onclick="downloadSummaryImage()">📸 下载摘要图片</button>
+        </div>
+        <div class="summary-box" id="summary-content">{{ stats.monthly_summary }}</div>
     </div>
     {% endif %}
 
@@ -326,22 +389,42 @@
 <script>
 const ANALYSIS_ID = '{{ analysis_id }}';
 const COLORS = ['#4f46e5','#7c3aed','#a855f7','#c084fc','#e879f9','#f472b6','#fb7185','#f87171','#fb923c','#fbbf24','#a3e635','#4ade80','#2dd4bf','#22d3ee','#38bdf8','#60a5fa'];
-const BAR_COLORS = ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#a78bfa','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#84cc16','#f97316','#14b8a6','#8b5cf6'];
 
+// Softer, less saturated palette for bar chart (adjacent distinguishable, Non-HR keeps #fcd34d)
+const SOFT_BAR_COLORS = [
+    '#667eea','#8b7eac','#5b9bd5','#6c8db0','#45b7d1','#7fb3b3',
+    '#f7dc6f','#bb8fce','#85c1e9','#73c6b6','#f8c471','#d7bde2',
+    '#a8d8a8','#f0a8a8','#a8c8f0'
+];
+
+// ── Expand/Collapse for type table ──
 function toggleMinor(row) {
     const idx = row.dataset.major;
-    const wasOpen = row.classList.contains('open');
-    // Close all
-    document.querySelectorAll('.major-row.open').forEach(r => r.classList.remove('open'));
-    document.querySelectorAll('.minor-row.show').forEach(r => r.classList.remove('show'));
-    if (wasOpen) return;
-    // Open this one
-    row.classList.add('open');
-    document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.add('show'));
-    // Update drill-down chart
-    const majorName = row.querySelector('strong').textContent.trim();
-    const majorItem = allMajorData.find(d => d.major === majorName);
-    if (majorItem && majorItem.minors.length > 0) renderDrill(majorItem);
+    const isExpanded = row.classList.contains('expanded');
+    if (isExpanded) {
+        row.classList.remove('expanded');
+        document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.remove('show'));
+    } else {
+        row.classList.add('expanded');
+        document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(r => r.classList.add('show'));
+        // Update drill-down chart
+        const majorName = row.querySelector('strong').textContent.trim();
+        const majorItem = allMajorData.find(d => d.major === majorName);
+        if (majorItem && majorItem.minors.length > 0) renderDrill(majorItem);
+    }
+}
+
+function expandAll() {
+    document.querySelectorAll('.major-row').forEach(r => {
+        r.classList.add('expanded');
+        const idx = r.dataset.major;
+        document.querySelectorAll(`.minor-row[data-parent="${idx}"]`).forEach(mr => mr.classList.add('show'));
+    });
+}
+
+function collapseAll() {
+    document.querySelectorAll('.major-row').forEach(r => r.classList.remove('expanded'));
+    document.querySelectorAll('.minor-row').forEach(r => r.classList.remove('show'));
 }
 
 // ── Major Type Chart (bar + 近三月均值 dots) ──
@@ -356,7 +439,7 @@ new Chart(majorCtx, {
             {
                 label: '当月',
                 data: majorData.map(d => d.count),
-                backgroundColor: majorData.map((d, i) => d.is_non_hr ? '#fcd34d' : BAR_COLORS[i % BAR_COLORS.length]),
+                backgroundColor: majorData.map((d, i) => d.is_non_hr ? '#fcd34d' : SOFT_BAR_COLORS[i % SOFT_BAR_COLORS.length]),
                 borderRadius: 4,
                 order: 2,
             },
@@ -389,7 +472,7 @@ new Chart(majorCtx, {
                 callbacks: {
                     label: function(ctx) {
                         const d = majorData[ctx.dataIndex];
-                        let txt = `${d.major}: ${d.count} 条`;
+                        let txt = `${d.major}: ${d.count} (${d.percentage}%)`;
                         if (d.avg_3m != null) txt += ` | 近三月均值: ${d.avg_3m}`;
                         if (d.vs_3m_pct != null) txt += ` | 环比: ${d.vs_3m_pct > 0 ? '+' : ''}${d.vs_3m_pct}%`;
                         return txt;
@@ -398,24 +481,6 @@ new Chart(majorCtx, {
             }
         },
         scales: { y: { ticks: { font: { size: 11 }, autoSkip: false } }, x: { ticks: { font: { size: 10 } } } }
-    }
-});
-
-// ── Origin Donut ──
-const originData = {{ stats.origin_distribution | tojson }};
-const origTotal = originData.reduce((s,d) => s+d.count, 0);
-new Chart(document.getElementById('originChart'), {
-    type: 'doughnut',
-    data: {
-        labels: originData.map(d => d.name),
-        datasets: [{ data: originData.map(d => d.count), backgroundColor: COLORS, borderWidth: 0 }]
-    },
-    options: {
-        responsive: true,
-        plugins: {
-            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/origTotal*100)}%)` } },
-            legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 12 } }
-        }
     }
 });
 
@@ -431,7 +496,6 @@ function renderDrill(majorItem) {
     const minors = majorItem.minors.slice(0, 12);
     const n = minors.length;
     const hasAvg = minors.some(m => m.avg_3m != null);
-    // Gradient: same hue, decreasing opacity from top
     const drillColors = minors.map((_, i) => {
         const alpha = 1 - (i / Math.max(n - 1, 1)) * 0.6;
         return `rgba(79,70,229,${alpha.toFixed(2)})`;
@@ -469,8 +533,9 @@ function renderDrill(majorItem) {
                 tooltip: { callbacks: {
                     label: function(ctx) {
                         const d = minors[ctx.dataIndex];
-                        let txt = `${d.name}: ${d.count} 条 (${d.major_pct}%)`;
+                        let txt = `${d.name}: ${d.count} (占大类 ${d.major_pct}% / 占总比 ${d.percentage}%)`;
                         if (d.avg_3m != null) txt += ` | 近三月均值: ${d.avg_3m}`;
+                        if (d.growth_rank) txt += ` | 增长排名: #${d.growth_rank}`;
                         return txt;
                     }
                 }}
@@ -480,13 +545,73 @@ function renderDrill(majorItem) {
     });
 }
 
-// Default: show first HR major
 if (firstHR) renderDrill(firstHR);
+
+// ── Case Source Origin Donut ──
+const originData = {{ stats.origin_distribution | tojson }};
+const origTotal = originData.reduce((s,d) => s+d.count, 0);
+new Chart(document.getElementById('originChart'), {
+    type: 'doughnut',
+    data: {
+        labels: originData.map(d => d.name),
+        datasets: [{ data: originData.map(d => d.count), backgroundColor: COLORS, borderWidth: 0 }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/origTotal*100)}%)` } },
+            legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 12 } }
+        }
+    }
+});
+
+// ── Solution Quality Chart ──
+{% if stats.csat_quality %}
+const qualityData = {{ stats.csat_quality | tojson }};
+const qLabels = Object.keys(qualityData);
+const qValues = qLabels.map(k => qualityData[k].pct);
+const qColors = ['#667eea', '#45b7d1', '#73c6b6'];
+new Chart(document.getElementById('qualityChart'), {
+    type: 'line',
+    data: {
+        labels: qLabels,
+        datasets: [{
+            label: 'Score %',
+            data: qValues,
+            borderColor: '#4f46e5',
+            backgroundColor: 'rgba(79,70,229,0.08)',
+            borderWidth: 2.5,
+            pointRadius: 6,
+            pointBackgroundColor: qColors,
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            tension: 0.3,
+            fill: true,
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+                label: ctx => {
+                    const k = qLabels[ctx.dataIndex];
+                    const d = qualityData[k];
+                    return `${k}: ${d.pct}% (avg ${d.avg}/5, n=${d.count})`;
+                }
+            }}
+        },
+        scales: {
+            y: { min: 0, max: 100, ticks: { font: { size: 10 }, callback: v => v + '%' }, title: { display: true, text: 'Score %', font: { size: 10 } } },
+            x: { ticks: { font: { size: 10 } } }
+        }
+    }
+});
+{% endif %}
 
 // ── Daily Trend (bar + 7-day MA line) ──
 const dailyData = {{ stats.daily_trend | tojson }};
 const dailyCounts = dailyData.map(d => d.count);
-// 7-day moving average
 const ma7 = [];
 for (let i = 0; i < dailyCounts.length; i++) {
     const start = Math.max(0, i - 3);
@@ -502,7 +627,7 @@ new Chart(document.getElementById('dailyChart'), {
             {
                 label: '每日 Case',
                 data: dailyCounts,
-                backgroundColor: 'rgba(79,70,229,0.5)',
+                backgroundColor: 'rgba(102,126,234,0.45)',
                 borderRadius: 3,
                 order: 2,
             },
@@ -531,7 +656,7 @@ new Chart(document.getElementById('dailyChart'), {
     }
 });
 
-// ── 12-month historical trend charts ──
+// ── 12-month historical trend chart: bar for case total, lines for percentages ──
 {% if historical %}
 const histCase = {{ historical.get('case_count', []) | tojson }};
 const histSLA = {{ historical.get('sla', []) | tojson }};
@@ -539,61 +664,83 @@ const histFTF = {{ historical.get('ftf', []) | tojson }};
 const histCSAT = {{ historical.get('csat', []) | tojson }};
 const histRR = {{ historical.get('csat_rr', []) | tojson }};
 
-// ── Monthly overview trend (before section 一) ──
 if (histCase.length > 0) {
-    const overviewDatasets = [
-        {
-            label: 'Case 总量',
-            data: histCase.map(d => d.value),
-            borderColor: '#4f46e5',
-            backgroundColor: 'rgba(79,70,229,0.08)',
-            yAxisID: 'y',
-            tension: 0.3, fill: true, pointRadius: 3, borderWidth: 2,
-        },
-    ];
     const pctColors = {
         sla: '#0891b2',
         ftf: '#e11d48',
         csat: '#7c3aed',
         rr: '#d97706',
     };
+    const overviewDatasets = [
+        {
+            label: 'Case 总量',
+            data: histCase.map(d => d.value),
+            backgroundColor: 'rgba(102,126,234,0.55)',
+            borderColor: '#667eea',
+            yAxisID: 'y',
+            borderRadius: 3,
+            order: 2,
+        },
+    ];
     if (histSLA.length > 0) overviewDatasets.push({
         label: 'SLA %', data: histSLA.map(d => d.value),
-        borderColor: pctColors.sla, yAxisID: 'y1',
+        borderColor: pctColors.sla, type: 'line', yAxisID: 'y1',
         tension: 0.3, pointRadius: 2, borderWidth: 1.5, borderDash: [4,2],
     });
     if (histFTF.length > 0) overviewDatasets.push({
         label: 'FTF %', data: histFTF.map(d => d.value),
-        borderColor: pctColors.ftf, yAxisID: 'y1',
+        borderColor: pctColors.ftf, type: 'line', yAxisID: 'y1',
         tension: 0.3, pointRadius: 2, borderWidth: 1.5, borderDash: [4,2],
     });
     if (histCSAT.length > 0) overviewDatasets.push({
         label: 'CSAT %', data: histCSAT.map(d => d.value),
-        borderColor: pctColors.csat, yAxisID: 'y1',
+        borderColor: pctColors.csat, type: 'line', yAxisID: 'y1',
         tension: 0.3, pointRadius: 2, borderWidth: 1.5,
     });
     if (histRR.length > 0) overviewDatasets.push({
         label: 'RR %', data: histRR.map(d => d.value),
-        borderColor: pctColors.rr, yAxisID: 'y1',
+        borderColor: pctColors.rr, type: 'line', yAxisID: 'y1',
         tension: 0.3, pointRadius: 2, borderWidth: 1.5,
     });
     new Chart(document.getElementById('trendOverview'), {
-        type: 'line',
+        type: 'bar',
         data: { labels: histCase.map(d => d.month), datasets: overviewDatasets },
         options: {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
-            plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true, padding: 16 } } },
+            plugins: {
+                legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true, padding: 16 } },
+                tooltip: { callbacks: {
+                    label: function(ctx) {
+                        let label = ctx.dataset.label || '';
+                        if (label) label += ': ';
+                        label += ctx.parsed.y;
+                        if (ctx.dataset.yAxisID === 'y1') label += '%';
+                        return label;
+                    }
+                }}
+            },
             scales: {
-                y: { position: 'left', title: { display: true, text: 'Cases' }, ticks: { font: { size: 9 } } },
-                y1: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: '%' }, ticks: { font: { size: 9 } } },
+                y: { position: 'left', title: { display: true, text: 'Cases' }, ticks: { font: { size: 9 } }, grid: { color: '#f3f4f6' } },
+                y1: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: '%' }, ticks: { font: { size: 9 }, callback: v => v + '%' } },
                 x: { ticks: { font: { size: 8 }, maxRotation: 45 } }
             }
         }
     });
 }
-
 {% endif %}
+
+// ── Download summary as image ──
+function downloadSummaryImage() {
+    const el = document.getElementById('summary-content');
+    if (!el) return;
+    html2canvas(el, { backgroundColor: '#ffffff', scale: 2 }).then(canvas => {
+        const link = document.createElement('a');
+        link.download = 'Case_Analysis_Summary.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    });
+}
 </script>
 </body>
 </html>
