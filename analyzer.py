@@ -146,11 +146,11 @@ def parse_excel(filepath):
         quality_cols = {}
         for col in csat_df.columns:
             col_lower = str(col).strip().lower()
-            if 'interaction' in col_lower:
+            if 'interaction' in col_lower or 'interact' in col_lower:
                 quality_cols['interaction'] = col
-            elif 'pers.serv' in col_lower or 'pers serv' in col_lower or 'personal' in col_lower:
+            elif 'pers' in col_lower and ('serv' in col_lower or 'personal' in col_lower):
                 quality_cols['pers_serv'] = col
-            elif 'comm' in col_lower and 'communication' in col_lower:
+            elif 'comm' in col_lower:
                 quality_cols['comm'] = col
         if quality_cols:
             csat_quality_raw = {'cols': quality_cols, 'df': csat_df}

@@ -5,10 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard — Case Intelligence Platform</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script>
-    // Lazy-load html2canvas, don't block page rendering
-    (function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';s.async=true;document.head.appendChild(s);})();
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f5f7fa; color: #1a1a2e; }
@@ -247,7 +244,7 @@
     <div class="section">
         <div class="section-title">月度指标趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">近12月 · China 地区</span></div>
         <div class="panel">
-            <canvas id="trendOverview" style="height:340px;"></canvas>
+            <canvas id="trendOverview" style="height:260px;"></canvas>
             {% if stats.analysis_summary_line %}
             <div class="analysis-line">{{ stats.analysis_summary_line }}</div>
             {% endif %}
@@ -342,23 +339,24 @@
                         <td style="color:#6b7280;font-size:10px;">{{ m.major_pct }}% / {{ m.percentage }}%</td>
                         <td>
                             {% if m.get('vs_3m_pct') is not none %}
-                            <span class="{{ 'delta-up' if m.vs_3m_pct > 0 else 'delta-down' }}" style="font-weight:600;font-size:10px;">
-                                {{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%
-                            </span>
+                            {% if m.growth_tag == 'red' %}
+                            <span class="delta-up" style="font-weight:600;font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
+                            <span class="rank-badge rank-red">#{{ m.growth_rank }}</span>
+                            {% elif m.growth_tag == 'orange' %}
+                            <span class="delta-warn" style="font-weight:600;font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
+                            <span class="rank-badge rank-orange">#{{ m.growth_rank }}</span>
+                            {% elif m.growth_tag == 'anomaly' %}
+                            <span class="delta-anomaly" style="font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
+                            <span class="rank-badge rank-anomaly">!</span>
+                            {% else %}
+                            <span style="color:#9ca3af;font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
+                            {% endif %}
                             {% else %}<span style="color:#d1d5db;font-size:10px;">—</span>{% endif %}
                         </td>
                         <td>
                             {% if m.get('delta_pct') is not none %}
-                            <span class="{{ 'delta-up' if m.delta_pct > 0 else 'delta-down' }}" style="font-weight:600;font-size:10px;">
-                                {{ '+' if m.delta_pct > 0 else '' }}{{ m.delta_pct }}%
-                            </span>
+                            <span style="color:#9ca3af;font-size:10px;">{{ '+' if m.delta_pct > 0 else '' }}{{ m.delta_pct }}%</span>
                             {% else %}<span style="color:#d1d5db;font-size:10px;">—</span>{% endif %}
-                            {% if m.get('growth_rank') %}
-                            <span class="rank-badge {{ 'rank-red' if m.growth_tag == 'red' else 'rank-orange' }}">#{{ m.growth_rank }}</span>
-                            {% endif %}
-                            {% if m.get('growth_tag') == 'anomaly' %}
-                            <span class="rank-badge rank-anomaly" title="高百分比低绝对值异常">!</span>
-                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -393,12 +391,8 @@
 const ANALYSIS_ID = '{{ analysis_id }}';
 const COLORS = ['#4f46e5','#7c3aed','#a855f7','#c084fc','#e879f9','#f472b6','#fb7185','#f87171','#fb923c','#fbbf24','#a3e635','#4ade80','#2dd4bf','#22d3ee','#38bdf8','#60a5fa'];
 
-// Softer, less saturated palette for bar chart (adjacent distinguishable, Non-HR keeps #fcd34d)
-const SOFT_BAR_COLORS = [
-    '#667eea','#8b7eac','#5b9bd5','#6c8db0','#45b7d1','#7fb3b3',
-    '#f7dc6f','#bb8fce','#85c1e9','#73c6b6','#f8c471','#d7bde2',
-    '#a8d8a8','#f0a8a8','#a8c8f0'
-];
+// Original palette (Non-HR uses muted amber instead of bright yellow)
+const BAR_COLORS = ['#4f46e5','#7c3aed','#6366f1','#8b5cf6','#a78bfa','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#84cc16','#f97316','#14b8a6','#8b5cf6'];
 
 // ── Expand/Collapse for type table ──
 function toggleMinor(row) {
@@ -442,7 +436,7 @@ new Chart(majorCtx, {
             {
                 label: '当月',
                 data: majorData.map(d => d.count),
-                backgroundColor: majorData.map((d, i) => d.is_non_hr ? '#fcd34d' : SOFT_BAR_COLORS[i % SOFT_BAR_COLORS.length]),
+                backgroundColor: majorData.map((d, i) => d.is_non_hr ? '#d4a853' : BAR_COLORS[i % BAR_COLORS.length]),
                 borderRadius: 4,
                 order: 2,
             },
@@ -568,12 +562,14 @@ new Chart(document.getElementById('originChart'), {
     }
 });
 
-// ── Solution Quality Chart ──
+// ── Solution Quality Chart (line, zoomed Y 95-100%) ──
 {% if stats.csat_quality %}
-const qualityData = {{ stats.csat_quality | tojson }};
-const qLabels = Object.keys(qualityData);
-const qValues = qLabels.map(k => qualityData[k].pct);
-const qColors = ['#667eea', '#45b7d1', '#73c6b6'];
+var qualityData = {{ stats.csat_quality | tojson }};
+var qLabels = Object.keys(qualityData);
+var qValues = qLabels.map(function(k) { return qualityData[k].pct; });
+var qMin = Math.min.apply(null, qValues);
+var qYMin = Math.max(0, Math.floor((qMin - 3) / 5) * 5); // round down to 5
+var qPointColors = ['#4f46e5', '#0891b2', '#10b981'];
 new Chart(document.getElementById('qualityChart'), {
     type: 'line',
     data: {
@@ -582,13 +578,13 @@ new Chart(document.getElementById('qualityChart'), {
             label: 'Score %',
             data: qValues,
             borderColor: '#4f46e5',
-            backgroundColor: 'rgba(79,70,229,0.08)',
+            backgroundColor: 'rgba(79,70,229,0.06)',
             borderWidth: 2.5,
-            pointRadius: 6,
-            pointBackgroundColor: qColors,
+            pointRadius: 5,
+            pointBackgroundColor: qPointColors,
             pointBorderColor: '#fff',
             pointBorderWidth: 2,
-            tension: 0.3,
+            tension: 0.2,
             fill: true,
         }]
     },
@@ -597,15 +593,19 @@ new Chart(document.getElementById('qualityChart'), {
         plugins: {
             legend: { display: false },
             tooltip: { callbacks: {
-                label: ctx => {
-                    const k = qLabels[ctx.dataIndex];
-                    const d = qualityData[k];
-                    return `${k}: ${d.pct}% (avg ${d.avg}/5, n=${d.count})`;
+                label: function(ctx) {
+                    var k = qLabels[ctx.dataIndex];
+                    var d = qualityData[k];
+                    return k + ': ' + d.pct + '% (avg ' + d.avg + '/5, n=' + d.count + ')';
                 }
             }}
         },
         scales: {
-            y: { min: 0, max: 100, ticks: { font: { size: 10 }, callback: v => v + '%' }, title: { display: true, text: 'Score %', font: { size: 10 } } },
+            y: {
+                min: qYMin, max: 100,
+                ticks: { stepSize: 1, font: { size: 10 }, callback: function(v) { return v + '%'; } },
+                title: { display: true, text: 'Score %', font: { size: 10 } }
+            },
             x: { ticks: { font: { size: 10 } } }
         }
     }
@@ -630,7 +630,7 @@ new Chart(document.getElementById('dailyChart'), {
             {
                 label: '每日 Case',
                 data: dailyCounts,
-                backgroundColor: 'rgba(102,126,234,0.45)',
+                backgroundColor: 'rgba(79,70,229,0.5)',
                 borderRadius: 3,
                 order: 2,
             },
@@ -668,65 +668,108 @@ const histCSAT = {{ historical.get('csat', []) | tojson }};
 const histRR = {{ historical.get('csat_rr', []) | tojson }};
 
 if (histCase.length > 0) {
-    const pctColors = {
+    // Format month labels to YYYYMM (e.g. 202601)
+    function fmtMonth(m) {
+        if (!m) return '';
+        var s = String(m).trim();
+        // Try to parse as date and format as YYYYMM
+        var d = new Date(s);
+        if (!isNaN(d) && d.getFullYear() > 2000) {
+            return String(d.getFullYear()) + String(d.getMonth()+1).padStart(2,'0');
+        }
+        // If already YYYYMM or similar, keep as-is
+        if (/^\d{6}$/.test(s)) return s;
+        if (/^\d{4}-\d{2}$/.test(s)) return s.replace('-','');
+        if (/^\d{4}\/\d{2}$/.test(s)) return s.replace('/','');
+        return s;
+    }
+
+    var pctColors = {
         sla: '#0891b2',
         ftf: '#e11d48',
         csat: '#7c3aed',
         rr: '#d97706',
     };
-    const overviewDatasets = [
+
+    // Compute nice step size for left Y-axis
+    var maxCase = 0;
+    histCase.forEach(function(d) { if (d.value > maxCase) maxCase = d.value; });
+    var caseStep = 1000;
+    if (maxCase < 1500) caseStep = 500;
+    else if (maxCase < 3000) caseStep = 500;
+    else if (maxCase < 8000) caseStep = 1000;
+    else caseStep = 2000;
+
+    var overviewDatasets = [
         {
             label: 'Case 总量',
-            data: histCase.map(d => d.value),
-            backgroundColor: 'rgba(102,126,234,0.55)',
-            borderColor: '#667eea',
+            data: histCase.map(function(d) { return d.value; }),
+            backgroundColor: 'rgba(79,70,229,0.40)',
+            borderColor: '#4f46e5',
             yAxisID: 'y',
-            borderRadius: 3,
+            borderRadius: 2,
             order: 2,
         },
     ];
     if (histSLA.length > 0) overviewDatasets.push({
-        label: 'SLA %', data: histSLA.map(d => d.value),
+        label: 'SLA %', data: histSLA.map(function(d) { return d.value; }),
         borderColor: pctColors.sla, type: 'line', yAxisID: 'y1',
-        tension: 0.3, pointRadius: 2, borderWidth: 1.5, borderDash: [4,2],
+        tension: 0.2, pointRadius: 2, borderWidth: 2, borderDash: [5,3],
     });
     if (histFTF.length > 0) overviewDatasets.push({
-        label: 'FTF %', data: histFTF.map(d => d.value),
+        label: 'FTF %', data: histFTF.map(function(d) { return d.value; }),
         borderColor: pctColors.ftf, type: 'line', yAxisID: 'y1',
-        tension: 0.3, pointRadius: 2, borderWidth: 1.5, borderDash: [4,2],
+        tension: 0.2, pointRadius: 2, borderWidth: 2, borderDash: [5,3],
     });
     if (histCSAT.length > 0) overviewDatasets.push({
-        label: 'CSAT %', data: histCSAT.map(d => d.value),
+        label: 'CSAT %', data: histCSAT.map(function(d) { return d.value; }),
         borderColor: pctColors.csat, type: 'line', yAxisID: 'y1',
-        tension: 0.3, pointRadius: 2, borderWidth: 1.5,
+        tension: 0.2, pointRadius: 2, borderWidth: 2,
     });
     if (histRR.length > 0) overviewDatasets.push({
-        label: 'RR %', data: histRR.map(d => d.value),
-        borderColor: pctColors.rr, type: 'line', yAxisID: 'y1',
-        tension: 0.3, pointRadius: 2, borderWidth: 1.5,
+        label: 'RR %', data: histRR.map(function(d) { return d.value; }),
+        borderColor: pctColors.rr, type: 'line', yAxisID: 'y2',
+        tension: 0.2, pointRadius: 2, borderWidth: 2,
     });
+
     new Chart(document.getElementById('trendOverview'), {
         type: 'bar',
-        data: { labels: histCase.map(d => d.month), datasets: overviewDatasets },
+        data: { labels: histCase.map(function(d) { return fmtMonth(d.month); }), datasets: overviewDatasets },
         options: {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true, padding: 16 } },
+                legend: { position: 'top', labels: { font: { size: 9 }, usePointStyle: true, padding: 12, boxWidth: 12 } },
                 tooltip: { callbacks: {
                     label: function(ctx) {
-                        let label = ctx.dataset.label || '';
+                        var label = ctx.dataset.label || '';
                         if (label) label += ': ';
                         label += ctx.parsed.y;
-                        if (ctx.dataset.yAxisID === 'y1') label += '%';
+                        if (ctx.dataset.yAxisID === 'y1' || ctx.dataset.yAxisID === 'y2') label += '%';
                         return label;
                     }
                 }}
             },
             scales: {
-                y: { position: 'left', title: { display: true, text: 'Cases' }, ticks: { font: { size: 9 } }, grid: { color: '#f3f4f6' } },
-                y1: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: '%' }, ticks: { font: { size: 9 }, callback: v => v + '%' } },
-                x: { ticks: { font: { size: 8 }, maxRotation: 45 } }
+                y: {
+                    position: 'left', type: 'linear',
+                    title: { display: true, text: 'Cases', font: { size: 9 } },
+                    ticks: { stepSize: caseStep, font: { size: 9 } },
+                    grid: { color: '#f0f0f0' }
+                },
+                y1: {
+                    position: 'right', type: 'linear',
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'SLA / FTF / CSAT %', font: { size: 9 } },
+                    ticks: { font: { size: 9 }, callback: function(v) { return v + '%'; } }
+                },
+                y2: {
+                    position: 'right', type: 'linear',
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'RR %', font: { size: 9 } },
+                    ticks: { font: { size: 9 }, callback: function(v) { return v + '%'; } }
+                },
+                x: { ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } }
             }
         }
     });
