@@ -383,22 +383,18 @@
     </div>
     {% endif %}
 
-    <!-- ═══════ 图表下载 ═══════ -->
+    <!-- ═══════ 图表下载（用于报告） ═══════ -->
     <div class="section">
-        <div class="section-title">📸 图表下载（用于报告）</div>
+        <div class="section-title">📸 报告用图表下载</div>
         <div class="panel">
             <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
                 {% if historical and historical.get('case_count') %}
-                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('trendOverview','月度指标趋势')">📥 月度趋势图</button>
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('trendOverview','01_月度指标趋势')">📥 1. 月度指标趋势</button>
                 {% endif %}
-                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('originChart','Case来源构成')">📥 Case来源</button>
-                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('majorChart','大类分布')">📥 大类分布</button>
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('majorChart','02_大类分布')">📥 2. 大类分布</button>
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('originChart','03_Case来源')">📥 3. Case 来源</button>
                 {% if stats.csat_quality %}
-                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('qualityChart','Solution_Quality')">📥 Solution Quality</button>
-                {% endif %}
-                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('dailyChart','每日趋势')">📥 每日趋势</button>
-                {% if stats.monthly_summary %}
-                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadSummaryImage()">📥 分析摘要</button>
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('qualityChart','04_Solution_Quality')">📥 4. Solution Quality</button>
                 {% endif %}
             </div>
         </div>
@@ -581,14 +577,13 @@ new Chart(document.getElementById('originChart'), {
     }
 });
 
-// ── Solution Quality Chart (line, zoomed Y 95-100%) ──
+// ── Solution Quality Chart (line, Y 99-100%, order: Service→Solution→Clear) ──
 {% if stats.csat_quality %}
 var qualityData = {{ stats.csat_quality | tojson }};
-var qLabels = Object.keys(qualityData);
+var qOrder = ['Service Professionalism', 'Solution Quality', 'Clear Communication'];
+var qLabels = qOrder.filter(function(k) { return qualityData[k] !== undefined; });
 var qValues = qLabels.map(function(k) { return qualityData[k].pct; });
-var qMin = Math.min.apply(null, qValues);
-var qYMin = Math.max(0, Math.floor((qMin - 3) / 5) * 5); // round down to 5
-var qPointColors = ['#4f46e5', '#0891b2', '#10b981'];
+var qPointColors = ['#0891b2', '#4f46e5', '#10b981'];
 new Chart(document.getElementById('qualityChart'), {
     type: 'line',
     data: {
@@ -597,13 +592,13 @@ new Chart(document.getElementById('qualityChart'), {
             label: 'Score %',
             data: qValues,
             borderColor: '#4f46e5',
-            backgroundColor: 'rgba(79,70,229,0.06)',
-            borderWidth: 2.5,
+            backgroundColor: 'rgba(79,70,229,0.04)',
+            borderWidth: 2,
             pointRadius: 5,
             pointBackgroundColor: qPointColors,
             pointBorderColor: '#fff',
             pointBorderWidth: 2,
-            tension: 0.2,
+            tension: 0.15,
             fill: true,
         }]
     },
@@ -621,8 +616,8 @@ new Chart(document.getElementById('qualityChart'), {
         },
         scales: {
             y: {
-                min: qYMin, max: 100,
-                ticks: { stepSize: 1, font: { size: 10 }, callback: function(v) { return v + '%'; } },
+                min: 99, max: 100,
+                ticks: { stepSize: 0.2, font: { size: 10 }, callback: function(v) { return v.toFixed(1) + '%'; } },
                 title: { display: true, text: 'Score %', font: { size: 10 } }
             },
             x: { ticks: { font: { size: 10 } } }
@@ -688,18 +683,26 @@ const histRR = {{ historical.get('csat_rr', []) | tojson }};
 
 if (histCase.length > 0) {
     // Format month labels to YYYYMM (e.g. 202601)
+    // Format month labels: "Jan-26" / "Feb-26" / "2026-01-01" → "202601"
     function fmtMonth(m) {
         if (!m) return '';
         var s = String(m).trim();
-        // Try to parse as date and format as YYYYMM
+        // Already YYYYMM
+        if (/^\d{6}$/.test(s)) return s;
+        if (/^\d{4}-\d{2}$/.test(s)) return s.replace('-','');
+        if (/^\d{4}\/\d{2}$/.test(s)) return s.replace('/','');
+        // Mon-YY e.g. "Jan-26", "Feb-26"
+        var monMap = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+        var m1 = s.match(/^([A-Za-z]{3})[- ](\d{2})$/);
+        if (m1) {
+            var mn = m1[1].toLowerCase();
+            if (monMap[mn]) return '20' + m1[2] + monMap[mn];
+        }
+        // Try Date parse last
         var d = new Date(s);
         if (!isNaN(d) && d.getFullYear() > 2000) {
             return String(d.getFullYear()) + String(d.getMonth()+1).padStart(2,'0');
         }
-        // If already YYYYMM or similar, keep as-is
-        if (/^\d{6}$/.test(s)) return s;
-        if (/^\d{4}-\d{2}$/.test(s)) return s.replace('-','');
-        if (/^\d{4}\/\d{2}$/.test(s)) return s.replace('/','');
         return s;
     }
 
@@ -709,15 +712,6 @@ if (histCase.length > 0) {
         csat: '#7c3aed',
         rr: '#d97706',
     };
-
-    // Compute nice step size for left Y-axis
-    var maxCase = 0;
-    histCase.forEach(function(d) { if (d.value > maxCase) maxCase = d.value; });
-    var caseStep = 1000;
-    if (maxCase < 1500) caseStep = 500;
-    else if (maxCase < 3000) caseStep = 500;
-    else if (maxCase < 8000) caseStep = 1000;
-    else caseStep = 2000;
 
     var overviewDatasets = [
         {
@@ -773,7 +767,7 @@ if (histCase.length > 0) {
                 y: {
                     position: 'left', type: 'linear',
                     title: { display: true, text: 'Cases', font: { size: 9 } },
-                    ticks: { stepSize: caseStep, font: { size: 9 } },
+                    ticks: { stepSize: 2000, font: { size: 9 } },
                     grid: { color: '#f0f0f0' }
                 },
                 y1: {
