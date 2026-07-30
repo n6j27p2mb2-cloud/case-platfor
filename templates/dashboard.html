@@ -378,12 +378,31 @@
     <!-- ═══════ 月度分析摘要 ═══════ -->
     {% if stats.monthly_summary %}
     <div class="section" id="summary-section">
-        <div class="section-title">📝 月度分析摘要
-            <button class="btn btn-outline" style="margin-left:12px;font-size:10px;padding:4px 10px;" onclick="downloadSummaryImage()">📸 下载摘要图片</button>
-        </div>
+        <div class="section-title">📝 月度分析摘要</div>
         <div class="summary-box" id="summary-content">{{ stats.monthly_summary }}</div>
     </div>
     {% endif %}
+
+    <!-- ═══════ 图表下载 ═══════ -->
+    <div class="section">
+        <div class="section-title">📸 图表下载（用于报告）</div>
+        <div class="panel">
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+                {% if historical and historical.get('case_count') %}
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('trendOverview','月度指标趋势')">📥 月度趋势图</button>
+                {% endif %}
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('originChart','Case来源构成')">📥 Case来源</button>
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('majorChart','大类分布')">📥 大类分布</button>
+                {% if stats.csat_quality %}
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('qualityChart','Solution_Quality')">📥 Solution Quality</button>
+                {% endif %}
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadChart('dailyChart','每日趋势')">📥 每日趋势</button>
+                {% if stats.monthly_summary %}
+                <button class="btn btn-outline" style="font-size:11px;padding:6px 12px;" onclick="downloadSummaryImage()">📥 分析摘要</button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 
 </div>
 
@@ -776,16 +795,26 @@ if (histCase.length > 0) {
 }
 {% endif %}
 
+// ── Download chart canvas as PNG ──
+function downloadChart(canvasId, filename) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    var link = document.createElement('a');
+    link.download = filename + '.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+}
+
 // ── Download summary as image ──
 function downloadSummaryImage() {
-    const el = document.getElementById('summary-content');
+    var el = document.getElementById('summary-content');
     if (!el) return;
     if (typeof html2canvas === 'undefined') {
-        alert('图片下载模块加载中，请稍后再试');
+        alert('图片下载模块未加载，请刷新页面后重试');
         return;
     }
-    html2canvas(el, { backgroundColor: '#ffffff', scale: 2 }).then(canvas => {
-        const link = document.createElement('a');
+    html2canvas(el, { backgroundColor: '#ffffff', scale: 2 }).then(function(canvas) {
+        var link = document.createElement('a');
         link.download = 'Case_Analysis_Summary.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
