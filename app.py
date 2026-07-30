@@ -23,6 +23,21 @@ RESULT_DIR.mkdir(exist_ok=True)
 
 analysis_store = {}
 
+# Simple debug log (in-memory, survives within one process)
+_debug_log = []
+
+def _log_error(source, error):
+    """Record error for debugging."""
+    _debug_log.append(f'[{__import__("datetime").datetime.now().isoformat()}] {source}: {error}')
+
+
+@app.route('/debug-log')
+def debug_log():
+    """Show recent debug log entries."""
+    if not _debug_log:
+        return '<pre>No errors logged yet.</pre>'
+    return '<pre>' + '\n'.join(_debug_log[-20:]) + '</pre>'
+
 
 @app.errorhandler(500)
 def internal_error(e):
@@ -150,18 +165,25 @@ def upload():
             cur_path2.unlink(missing_ok=True)
 
         # Summary
-        current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
-        # Analysis line
-        last_month_label = ''
         try:
-            from datetime import datetime
+            current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
+        except Exception as e:
+            current_stats['monthly_summary'] = f'Summary generation failed: {e}'
+            _log_error('generate_monthly_summary', e)
+
+        # Analysis line
+        try:
+            from datetime import datetime, timedelta
             end_str = current_stats.get('date_range', {}).get('end', '')
             end_dt = datetime.strptime(end_str, '%Y-%m-%d')
-            prev_month = end_dt.replace(day=1) - __import__('datetime').timedelta(days=1)
-            last_month_label = prev_month.strftime("%b'%y")
+            last_month_label = (end_dt.replace(day=1) - timedelta(days=1)).strftime("%b'%y")
         except Exception:
-            pass
-        current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, last_month_label)
+            last_month_label = ''
+        try:
+            current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, last_month_label)
+        except Exception as e:
+            current_stats['analysis_summary_line'] = ''
+            _log_error('generate_analysis_line', e)
 
         # Store
         analysis_id = uuid.uuid4().hex
@@ -178,6 +200,7 @@ def upload():
 
     except Exception as e:
         tb = traceback.format_exc()
+        _log_error('upload', tb)
         return f'<pre style="color:red;padding:20px;white-space:pre-wrap;">上传失败: {e}\n\n{tb}</pre>', 500
 
 
