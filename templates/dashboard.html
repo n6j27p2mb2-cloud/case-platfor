@@ -244,7 +244,7 @@
     <div class="section" id="trend-section">
         <div class="section-title">月度指标趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">近12月 · China 地区</span></div>
         <div class="panel" id="trend-panel">
-            <canvas id="trendOverview" style="height:220px;"></canvas>
+            <div style="height:440px;"><canvas id="trendOverview"></canvas></div>
             {% if stats.analysis_summary_line %}
             <div class="analysis-line">{{ stats.analysis_summary_line }}</div>
             {% endif %}
@@ -280,16 +280,13 @@
     <div class="section">
         <div class="section-title">Case 类型分布</div>
         <div class="grid-2">
-            <div class="panel">
-                <div class="panel" id="major-panel">
+            <div class="panel" id="major-panel">
                 <h2>大类分布 <span class="section-desc">点击展开子类</span></h2>
                 <canvas id="majorChart" style="max-height:400px;"></canvas>
             </div>
-            <div>
-                <div class="panel">
-                    <h2>子类下钻 <span class="section-desc" id="drill-title">点击柱状图或表格查看子类</span></h2>
-                    <canvas id="drillChart" style="max-height:380px;"></canvas>
-                </div>
+            <div class="panel">
+                <h2>子类下钻 <span class="section-desc" id="drill-title">点击柱状图或表格查看子类</span></h2>
+                <canvas id="drillChart" style="max-height:380px;"></canvas>
             </div>
         </div>
         <!-- Expandable Table -->
@@ -577,13 +574,19 @@ new Chart(document.getElementById('originChart'), {
     }
 });
 
-// ── Solution Quality Chart (line, Y 99-100%, order: Service→Solution→Clear) ──
+// ── Solution Quality Chart (line, Y-axis tight to show differences) ──
 {% if stats.csat_quality %}
 var qualityData = {{ stats.csat_quality | tojson }};
 var qOrder = ['Service Professionalism', 'Solution Quality', 'Clear Communication'];
 var qLabels = qOrder.filter(function(k) { return qualityData[k] !== undefined; });
 var qValues = qLabels.map(function(k) { return qualityData[k].pct; });
 var qPointColors = ['#0891b2', '#4f46e5', '#10b981'];
+var qYMin = Math.min.apply(null, qValues);
+var qYMax = Math.max.apply(null, qValues);
+var qRange = qYMax - qYMin;
+var qPad = Math.max(qRange * 0.5, 0.15);
+var qAxisMin = Math.max(0, Math.floor((qYMin - qPad) * 10) / 10);
+var qAxisMax = Math.min(100, Math.ceil((qYMax + qPad) * 10) / 10);
 new Chart(document.getElementById('qualityChart'), {
     type: 'line',
     data: {
@@ -604,6 +607,7 @@ new Chart(document.getElementById('qualityChart'), {
     },
     options: {
         responsive: true, maintainAspectRatio: false,
+        layout: { padding: { left: 10, right: 10 } },
         plugins: {
             legend: { display: false },
             tooltip: { callbacks: {
@@ -616,12 +620,12 @@ new Chart(document.getElementById('qualityChart'), {
         },
         scales: {
             y: {
-                min: 99, max: 100,
-                ticks: { stepSize: 0.2, font: { size: 10 }, callback: function(v) { return v.toFixed(1) + '%'; } },
+                min: qAxisMin, max: qAxisMax,
+                ticks: { stepSize: 0.05, font: { size: 10 }, callback: function(v) { return v.toFixed(2) + '%'; } },
                 grid: { drawBorder: false }
             },
             x: {
-                position: 'top',
+                offset: true,
                 grid: { display: false },
                 ticks: { font: { size: 10 }, padding: 4 }
             }
@@ -701,6 +705,12 @@ if (histCase.length > 0) {
         if (m1) {
             var mn = m1[1].toLowerCase();
             if (monMap[mn]) return '20' + m1[2] + monMap[mn];
+        }
+        // MonYY without dash e.g. "Jun25", "Jan26"
+        var m2 = s.match(/^([A-Za-z]{3})(\d{2})$/);
+        if (m2) {
+            var mn2 = m2[1].toLowerCase();
+            if (monMap[mn2]) return '20' + m2[2] + monMap[mn2];
         }
         // Try Date parse last
         var d = new Date(s);
@@ -786,7 +796,7 @@ if (histCase.length > 0) {
                     title: { display: true, text: 'RR %', font: { size: 9 } },
                     ticks: { font: { size: 9 }, callback: function(v) { return v + '%'; } }
                 },
-                x: { ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } }
+                x: { ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: false } }
             }
         }
     });
