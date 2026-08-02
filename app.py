@@ -23,20 +23,30 @@ RESULT_DIR.mkdir(exist_ok=True)
 
 analysis_store = {}
 
-# Simple debug log (in-memory, survives within one process)
-_debug_log = []
+# Debug log — persisted to file so it survives worker restarts
+import datetime as _dt
+DEBUG_LOG_FILE = Path(__file__).parent / 'debug.log'
 
 def _log_error(source, error):
-    """Record error for debugging."""
-    _debug_log.append(f'[{__import__("datetime").datetime.now().isoformat()}] {source}: {error}')
+    """Record error for debugging (file + in-memory)."""
+    entry = f'[{_dt.datetime.now().isoformat()}] {source}: {error}'
+    try:
+        with open(DEBUG_LOG_FILE, 'a') as f:
+            f.write(entry + '\n')
+    except Exception:
+        pass
 
 
 @app.route('/debug-log')
 def debug_log():
-    """Show recent debug log entries."""
-    if not _debug_log:
-        return '<pre>No errors logged yet.</pre>'
-    return '<pre>' + '\n'.join(_debug_log[-20:]) + '</pre>'
+    """Show recent debug log entries from file."""
+    try:
+        if not DEBUG_LOG_FILE.exists():
+            return '<pre>No errors logged yet.</pre>'
+        lines = DEBUG_LOG_FILE.read_text().strip().split('\n')
+        return '<pre>' + '\n'.join(lines[-30:]) + '</pre>'
+    except Exception as e:
+        return f'<pre>Error reading log: {e}</pre>'
 
 
 @app.errorhandler(500)
@@ -107,10 +117,14 @@ def upload():
 
     try:
         # Parse current month
+        _log_error('upload', f'Starting: file={cur_file.filename}, prev={len(prev_files)}, owner={owner_name}')
         cur_path = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
         cur_file.save(str(cur_path))
+        _log_error('upload', f'Saved cur file: {cur_path.stat().st_size} bytes')
         df, csat_df, metrics, csat_quality_raw = parse_excel(str(cur_path))
+        _log_error('upload', f'Parsed: {len(df)} rows')
         current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
+        _log_error('upload', 'Analyzed current month OK')
         cur_path.unlink(missing_ok=True)
 
         # Parse previous months
