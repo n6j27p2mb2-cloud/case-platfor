@@ -96,6 +96,7 @@
             {% if request.args.get('error') %}
             <div class="error-msg">{{ request.args.get('error') }}</div>
             {% endif %}
+            <div class="error-msg" id="submit-error" style="display:none;"></div>
 
             <form action="/upload" method="POST" enctype="multipart/form-data" id="upload-form">
                 <!-- Current month -->
@@ -197,9 +198,64 @@
         function doSubmit() {
             if (!curFile) return;
             const btn = document.getElementById('submit-btn');
+            const form = document.getElementById('upload-form');
+            const timeoutSec = 90;
+            let elapsed = 0;
             btn.disabled = true;
             btn.textContent = '分析中...';
-            document.getElementById('upload-form').submit();
+            document.getElementById('submit-error').style.display = 'none';
+
+            // Submit via fetch with timeout
+            const controller = new AbortController();
+            const timer = setInterval(() => {
+                elapsed++;
+                btn.textContent = '分析中 (' + elapsed + 's)...';
+                if (elapsed >= timeoutSec) {
+                    controller.abort();
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    btn.textContent = '重新分析';
+                    showError('分析超时（超过' + timeoutSec + '秒未响应）。Render 免费版可能内存不足或正在冷启动。<br><br>建议：1) 等待 1 分钟后重试  2) 检查 <a href="/debug-log" style="color:#991b1b;">调试日志</a>');
+                }
+            }, 1000);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: new FormData(form),
+                signal: controller.signal,
+                redirect: 'follow'
+            }).then(response => {
+                clearInterval(timer);
+                if (response.ok) {
+                    // The server redirected to dashboard, follow it
+                    window.location.href = response.url;
+                } else {
+                    response.text().then(html => {
+                        btn.disabled = false;
+                        btn.textContent = '开始分析';
+                        showError('服务器错误，请查看 <a href="/debug-log" style="color:#991b1b;">调试日志</a><br><pre style="font-size:11px;margin-top:8px;max-height:200px;overflow:auto;">' + escapeHtml(html.substring(0, 800)) + '</pre>');
+                    });
+                }
+            }).catch(err => {
+                clearInterval(timer);
+                if (err.name !== 'AbortError') {
+                    btn.disabled = false;
+                    btn.textContent = '开始分析';
+                    showError('网络错误：' + err.message + '<br>请检查 Render 是否在线，或稍后重试。');
+                }
+            });
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('submit-error');
+            el.innerHTML = msg;
+            el.style.display = 'block';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         setupZone(
