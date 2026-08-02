@@ -1,5 +1,6 @@
 import os
 import uuid
+import threading
 import traceback
 from functools import wraps
 from pathlib import Path
@@ -22,6 +23,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 RESULT_DIR.mkdir(exist_ok=True)
 
 analysis_store = {}
+task_store = {}
+task_lock = threading.Lock()
 
 # Debug log — persisted to file so it survives worker restarts
 import datetime as _dt
@@ -97,6 +100,99 @@ def index():
     return render_template('index.html')
 
 
+def _process_task(task_id, paths, cur_filename, prev_filenames, owner_name):
+    """Background processing — runs in thread so upload returns immediately."""
+    try:
+        with task_lock:
+            task_store[task_id]['status'] = 'processing'
+
+        _log_error(task_id, f'Start: file={cur_filename}')
+        df, csat_df, metrics, csat_quality_raw = parse_excel(paths['cur'])
+        _log_error(task_id, f'Parsed: {len(df)} rows')
+
+        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
+        _log_error(task_id, 'Analyzed OK')
+
+        prev_stats_list = []
+        for ppath in paths.get('prev', []):
+            pdf, pcsat, pmetrics, pquality = parse_excel(ppath)
+            prev_stats_list.append(analyze(pdf, pcsat, pmetrics, pquality))
+
+        historical_data = None
+        if paths.get('hist'):
+            try:
+                from analyzer import parse_historical
+                historical_data = parse_historical(paths['hist'])
+            except Exception:
+                pass
+
+        current_stats = compute_comparisons(current_stats, prev_stats_list)
+
+        if owner_name:
+            df2, csat_df2, metrics2, quality2 = parse_excel(paths['cur'])
+            if 'Owner' in df2.columns:
+                df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
+            elif 'Individual' in df2.columns:
+                df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
+            current_stats = analyze(df2, csat_df2, metrics2, quality2)
+            if paths.get('prev'):
+                prev_owner = []
+                for ppath in paths['prev']:
+                    pdf2, pcsat2, pm2, pq2 = parse_excel(ppath)
+                    if 'Owner' in pdf2.columns:
+                        pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
+                    elif 'Individual' in pdf2.columns:
+                        pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
+                    prev_owner.append(analyze(pdf2, pcsat2, pm2, pq2))
+                current_stats = compute_comparisons(current_stats, prev_owner)
+
+        try:
+            current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
+        except Exception as e:
+            current_stats['monthly_summary'] = f'Summary failed: {e}'
+
+        try:
+            from datetime import datetime, timedelta
+            end_str = current_stats.get('date_range', {}).get('end', '')
+            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
+            ll = (end_dt.replace(day=1) - timedelta(days=1)).strftime("%b'%y")
+        except Exception:
+            ll = ''
+        try:
+            current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, ll)
+        except Exception:
+            current_stats['analysis_summary_line'] = ''
+
+        analysis_id = uuid.uuid4().hex
+        analysis_store[analysis_id] = {
+            'stats': current_stats,
+            'filename': cur_filename,
+            'prev_filenames': prev_filenames,
+            'has_comparison': current_stats.get('has_comparison', False),
+            'owner_name': owner_name,
+            'historical': historical_data,
+        }
+
+        with task_lock:
+            task_store[task_id]['status'] = 'done'
+            task_store[task_id]['analysis_id'] = analysis_id
+        _log_error(task_id, 'Done')
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        _log_error(task_id, tb)
+        with task_lock:
+            task_store[task_id]['status'] = 'error'
+            task_store[task_id]['error'] = str(e)[:500]
+    finally:
+        for p in paths.values():
+            if isinstance(p, str):
+                Path(p).unlink(missing_ok=True)
+            elif isinstance(p, list):
+                for pp in p:
+                    Path(pp).unlink(missing_ok=True)
+
+
 @app.route('/upload', methods=['POST'])
 @require_auth
 def upload():
@@ -104,118 +200,68 @@ def upload():
     if not cur_file or not cur_file.filename.endswith(('.xlsx', '.xls')):
         return redirect(url_for('index', error='请上传当月报告文件'))
 
-    prev_files = []
+    paths = {}
     prev_filenames = []
+
+    # Save current file
+    cur_path = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+    cur_file.save(str(cur_path))
+    paths['cur'] = str(cur_path)
+
+    # Save previous files
+    prev_paths = []
     for i in range(1, 4):
         pf = request.files.get(f'prev_file_{i}')
         if pf and pf.filename.endswith(('.xlsx', '.xls')):
-            prev_files.append(pf)
-            prev_filenames.append(pf.filename)
-
-    hist_file = request.files.get('hist_file')
-    owner_name = request.form.get('owner_name', '').strip() or None
-
-    try:
-        # Parse current month
-        _log_error('upload', f'Starting: file={cur_file.filename}, prev={len(prev_files)}, owner={owner_name}')
-        cur_path = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
-        cur_file.save(str(cur_path))
-        _log_error('upload', f'Saved cur file: {cur_path.stat().st_size} bytes')
-        df, csat_df, metrics, csat_quality_raw = parse_excel(str(cur_path))
-        _log_error('upload', f'Parsed: {len(df)} rows')
-        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
-        _log_error('upload', 'Analyzed current month OK')
-        cur_path.unlink(missing_ok=True)
-
-        # Parse previous months
-        prev_stats_list = []
-        for pf in prev_files:
             ppath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
             pf.save(str(ppath))
-            pdf, pcsat, pmetrics, pquality = parse_excel(str(ppath))
-            prev_stats_list.append(analyze(pdf, pcsat, pmetrics, pquality))
-            ppath.unlink(missing_ok=True)
+            prev_paths.append(str(ppath))
+            prev_filenames.append(pf.filename)
+    paths['prev'] = prev_paths
 
-        # Parse historical
-        historical_data = None
-        if hist_file and hist_file.filename.endswith(('.xlsx', '.xls')):
-            try:
-                from analyzer import parse_historical
-                hpath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
-                hist_file.save(str(hpath))
-                historical_data = parse_historical(str(hpath))
-                hpath.unlink(missing_ok=True)
-            except Exception:
-                pass
+    # Save historical
+    hist_file = request.files.get('hist_file')
+    if hist_file and hist_file.filename.endswith(('.xlsx', '.xls')):
+        hpath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
+        hist_file.save(str(hpath))
+        paths['hist'] = str(hpath)
 
-        # Comparisons
-        current_stats = compute_comparisons(current_stats, prev_stats_list)
+    owner_name = request.form.get('owner_name', '').strip() or None
 
-        # Owner filter
-        if owner_name:
-            cur_path2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
-            cur_file.seek(0)
-            cur_file.save(str(cur_path2))
-            df2, csat_df2, metrics2, quality2 = parse_excel(str(cur_path2))
-            if 'Owner' in df2.columns:
-                df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
-            elif 'Individual' in df2.columns:
-                df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
-            current_stats = analyze(df2, csat_df2, metrics2, quality2)
-            if prev_files:
-                prev_owner = []
-                for pf in prev_files:
-                    pf.seek(0)
-                    ppath2 = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
-                    pf.save(str(ppath2))
-                    pdf2, pcsat2, pm2, pq2 = parse_excel(str(ppath2))
-                    if 'Owner' in pdf2.columns:
-                        pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
-                    elif 'Individual' in pdf2.columns:
-                        pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
-                    prev_owner.append(analyze(pdf2, pcsat2, pm2, pq2))
-                    ppath2.unlink(missing_ok=True)
-                current_stats = compute_comparisons(current_stats, prev_owner)
-            cur_path2.unlink(missing_ok=True)
+    # Create task and start background thread
+    task_id = uuid.uuid4().hex
+    with task_lock:
+        task_store[task_id] = {'status': 'pending'}
 
-        # Summary
-        try:
-            current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
-        except Exception as e:
-            current_stats['monthly_summary'] = f'Summary generation failed: {e}'
-            _log_error('generate_monthly_summary', e)
+    thread = threading.Thread(
+        target=_process_task,
+        args=(task_id, paths, cur_file.filename, prev_filenames, owner_name),
+        daemon=True
+    )
+    thread.start()
 
-        # Analysis line
-        try:
-            from datetime import datetime, timedelta
-            end_str = current_stats.get('date_range', {}).get('end', '')
-            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
-            last_month_label = (end_dt.replace(day=1) - timedelta(days=1)).strftime("%b'%y")
-        except Exception:
-            last_month_label = ''
-        try:
-            current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, last_month_label)
-        except Exception as e:
-            current_stats['analysis_summary_line'] = ''
-            _log_error('generate_analysis_line', e)
+    return redirect(url_for('processing', task_id=task_id))
 
-        # Store
-        analysis_id = uuid.uuid4().hex
-        analysis_store[analysis_id] = {
-            'stats': current_stats,
-            'filename': cur_file.filename,
-            'prev_filenames': prev_filenames,
-            'has_comparison': current_stats.get('has_comparison', False),
-            'owner_name': owner_name,
-            'historical': historical_data,
-        }
 
-        return redirect(url_for('dashboard', analysis_id=analysis_id))
+@app.route('/processing/<task_id>')
+@require_auth
+def processing(task_id):
+    if task_id not in task_store:
+        return redirect(url_for('index', error='任务已过期，请重新上传'))
+    return render_template('processing.html', task_id=task_id)
 
-    except Exception as e:
-        tb = traceback.format_exc()
-        _log_error('upload', tb)
-        return f'<pre style="color:red;padding:20px;white-space:pre-wrap;">上传失败: {e}\n\n{tb}</pre>', 500
+
+@app.route('/api/status/<task_id>')
+@require_auth
+def task_status(task_id):
+    task = task_store.get(task_id)
+    if not task:
+        return jsonify({'status': 'error', 'error': '任务不存在'}), 404
+    return jsonify({
+        'status': task['status'],
+        'analysis_id': task.get('analysis_id', ''),
+        'error': task.get('error', ''),
+    })
 
 
 @app.route('/dashboard/<analysis_id>')
