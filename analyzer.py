@@ -98,12 +98,15 @@ def _fmt_duration(sec):
 
 def parse_excel(filepath):
     """Parse a monthly HR Ops report. Returns (df, csat_df, metrics_dict) for China only."""
-    xl = pd.ExcelFile(filepath)
-
-    # HROps sheet
-    df = pd.read_excel(xl, 'HROps')
-    to_drop = [c for c in PII_DROP if c in df.columns]
-    df = df.drop(columns=to_drop, errors='ignore')
+    # Read HROps sheet with only needed columns to save memory on Render
+    needed_cols = ['GEO', 'Created', 'FirstCloseDate', 'CaseType', 'Origin',
+                   'FirstCloseResolution', 'Owner', 'Individual',
+                   'Title', 'SLA Met Flag', 'FTF', 'Reopen']
+    # First peek to get available columns
+    df_peek = pd.read_excel(filepath, sheet_name='HROps', nrows=0, engine='openpyxl')
+    avail_cols = list(df_peek.columns)
+    read_cols = [c for c in needed_cols if c in avail_cols]
+    df = pd.read_excel(filepath, sheet_name='HROps', usecols=read_cols, engine='openpyxl')
 
     # Filter China only
     if 'GEO' in df.columns:
@@ -133,16 +136,24 @@ def parse_excel(filepath):
         lambda x: str(x).startswith('Non-HR') if pd.notna(x) else False
     )
 
-    # ── CSAT sheet ──
+    # ── CSAT sheet (China only) ──
     csat_df = None
     csat_quality_raw = None
-    if 'CSAT' in xl.sheet_names:
-        csat_df = pd.read_excel(xl, 'CSAT')
-        csat_drop = [c for c in PII_DROP if c in csat_df.columns]
-        csat_df = csat_df.drop(columns=csat_drop, errors='ignore')
+    try:
+        csat_peek = pd.read_excel(filepath, sheet_name='CSAT', nrows=0, engine='openpyxl')
+    except ValueError:
+        csat_peek = None
+
+    if csat_peek is not None:
+        csat_avail = list(csat_peek.columns)
+        csat_read = [c for c in needed_cols if c in csat_avail]
+        # Also read quality-related columns
+        quality_col_names = [c for c in csat_avail
+                            if any(kw in str(c).lower() for kw in ['interact', 'pers', 'comm', 'qual'])]
+        all_csat_cols = list(set(csat_read + quality_col_names))
+        csat_df = pd.read_excel(filepath, sheet_name='CSAT', usecols=all_csat_cols, engine='openpyxl')
         if 'GEO' in csat_df.columns:
             csat_df = csat_df[csat_df['GEO'] == 'China'].copy()
-        # Extract quality metric columns (case-insensitive match)
         quality_cols = {}
         for col in csat_df.columns:
             col_lower = str(col).strip().lower()
@@ -155,10 +166,14 @@ def parse_excel(filepath):
         if quality_cols:
             csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
 
-    # ── Metrics sheet (for KPIs) ──
+    # ── Metrics sheet ──
     metrics = {}
-    if 'Metrics' in xl.sheet_names:
-        metrics_df = pd.read_excel(xl, 'Metrics', header=None)
+    try:
+        metrics_df = pd.read_excel(filepath, sheet_name='Metrics', header=None, engine='openpyxl')
+    except ValueError:
+        metrics_df = None
+
+    if metrics_df is not None:
         metrics = _parse_metrics_sheet(metrics_df, df, csat_df)
 
     return df, csat_df, metrics, csat_quality_raw
@@ -352,7 +367,7 @@ def analyze(df, csat_df=None, metrics=None, csat_quality_raw=None):
         }
         for key, col_name in cols.items():
             if col_name in qdf.columns:
-                vals = qdf[col_name].dropna()
+                vals = pd.to_numeric(qdf[col_name], errors='coerce').dropna()
                 if len(vals) > 0:
                     avg_val = vals.mean()
                     pct = round(avg_val / 5 * 100, 1)
