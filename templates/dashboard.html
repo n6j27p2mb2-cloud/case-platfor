@@ -583,10 +583,12 @@ var qValues = qLabels.map(function(k) { return qualityData[k].pct; });
 var qPointColors = ['#0891b2', '#4f46e5', '#10b981'];
 var qYMin = Math.min.apply(null, qValues);
 var qYMax = Math.max.apply(null, qValues);
-var qRange = qYMax - qYMin;
-var qPad = Math.max(qRange * 0.5, 0.15);
-var qAxisMin = Math.max(0, Math.floor((qYMin - qPad) * 10) / 10);
-var qAxisMax = Math.min(100, Math.ceil((qYMax + qPad) * 10) / 10);
+var qRange = qYMax - qYMin || 1;
+var qPad = Math.max(qRange * 0.6, 1);
+var qAxisMin = Math.max(0, Math.floor(qYMin - qPad));
+var qAxisMax = Math.min(100, Math.ceil(qYMax + qPad));
+var qStep = Math.max(0.5, Math.round(qRange / 6 * 10) / 10);
+
 new Chart(document.getElementById('qualityChart'), {
     type: 'line',
     data: {
@@ -598,7 +600,7 @@ new Chart(document.getElementById('qualityChart'), {
             backgroundColor: 'rgba(79,70,229,0.04)',
             borderWidth: 2,
             pointRadius: 5,
-            pointBackgroundColor: qPointColors,
+            pointBackgroundColor: qPointColors.slice(0, qLabels.length),
             pointBorderColor: '#fff',
             pointBorderWidth: 2,
             tension: 0.15,
@@ -621,13 +623,17 @@ new Chart(document.getElementById('qualityChart'), {
         scales: {
             y: {
                 min: qAxisMin, max: qAxisMax,
-                ticks: { stepSize: 0.05, font: { size: 10 }, callback: function(v) { return v.toFixed(2) + '%'; } },
-                grid: { drawBorder: false }
+                ticks: {
+                    stepSize: qStep,
+                    font: { size: 11 },
+                    callback: function(v) { return v.toFixed(1) + '%'; }
+                },
+                grid: { drawBorder: false, color: 'rgba(0,0,0,0.06)' }
             },
             x: {
                 offset: true,
                 grid: { display: false },
-                ticks: { font: { size: 10 }, padding: 4 }
+                ticks: { font: { size: 11 }, padding: 4 }
             }
         }
     }

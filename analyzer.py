@@ -149,7 +149,7 @@ def parse_excel(filepath):
         csat_read = [c for c in needed_cols if c in csat_avail]
         # Also read quality-related columns
         quality_col_names = [c for c in csat_avail
-                            if any(kw in str(c).lower() for kw in ['interact', 'pers', 'comm', 'qual'])]
+                            if any(kw in str(c).lower() for kw in ['quality', 'interact', 'pers', 'profession', 'serv', 'comm', 'clear'])]
         all_csat_cols = list(set(csat_read + quality_col_names))
         csat_df = pd.read_excel(filepath, sheet_name='CSAT', usecols=all_csat_cols, engine='openpyxl')
         if 'GEO' in csat_df.columns:
@@ -157,11 +157,11 @@ def parse_excel(filepath):
         quality_cols = {}
         for col in csat_df.columns:
             col_lower = str(col).strip().lower()
-            if 'interaction' in col_lower or 'interact' in col_lower:
+            if any(kw in col_lower for kw in ['interaction', 'interact', 'quality', 'solution']):
                 quality_cols['interaction'] = col
-            elif 'pers' in col_lower and ('serv' in col_lower or 'personal' in col_lower):
+            elif any(kw in col_lower for kw in ['pers', 'profession', 'serv']):
                 quality_cols['pers_serv'] = col
-            elif 'comm' in col_lower:
+            elif any(kw in col_lower for kw in ['comm', 'clear']):
                 quality_cols['comm'] = col
         if quality_cols:
             csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
