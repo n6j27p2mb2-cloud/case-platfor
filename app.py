@@ -240,7 +240,7 @@ def upload():
     )
     thread.start()
 
-    return redirect(url_for('processing', task_id=task_id))
+    return redirect(url_for('processing', task_id=task_id), code=303)
 
 
 @app.route('/processing/<task_id>')
