@@ -1,6 +1,8 @@
 import os
+import sys
+import json
 import uuid
-import threading
+import subprocess
 import traceback
 from functools import wraps
 from pathlib import Path
@@ -8,7 +10,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 from dotenv import load_dotenv
 
-from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, prepare_ai_prompt, generate_analysis_line
+from analyzer import prepare_ai_prompt
 from report_gen import generate_report
 
 load_dotenv()
@@ -22,34 +24,35 @@ RESULT_DIR = Path(__file__).parent / 'results'
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULT_DIR.mkdir(exist_ok=True)
 
-analysis_store = {}
-task_store = {}
-task_lock = threading.Lock()
+WORKER_LOG = Path(__file__).parent / 'worker.log'
 
-# Debug log — persisted to file so it survives worker restarts
-import datetime as _dt
-DEBUG_LOG_FILE = Path(__file__).parent / 'debug.log'
 
-def _log_error(source, error):
-    """Record error for debugging (file + in-memory)."""
-    entry = f'[{_dt.datetime.now().isoformat()}] {source}: {error}'
+def _get_task(task_id):
+    """Read task status from result file."""
+    f = RESULT_DIR / f'{task_id}_status.json'
+    if not f.exists():
+        return None
+    return json.loads(f.read_text())
+
+
+def _get_analysis(analysis_id):
+    """Read analysis data from result file."""
+    f = RESULT_DIR / f'{analysis_id}_analysis.json'
+    if not f.exists():
+        return None
+    return json.loads(f.read_text())
+
+
+@app.route('/worker-log')
+def worker_log():
+    """Show worker subprocess log (processing progress)."""
     try:
-        with open(DEBUG_LOG_FILE, 'a') as f:
-            f.write(entry + '\n')
-    except Exception:
-        pass
-
-
-@app.route('/debug-log')
-def debug_log():
-    """Show recent debug log entries from file."""
-    try:
-        if not DEBUG_LOG_FILE.exists():
-            return '<pre>No errors logged yet.</pre>'
-        lines = DEBUG_LOG_FILE.read_text().strip().split('\n')
-        return '<pre>' + '\n'.join(lines[-30:]) + '</pre>'
+        if not WORKER_LOG.exists():
+            return '<pre>No worker log yet.</pre>'
+        lines = WORKER_LOG.read_text().strip().split('\n')
+        return '<pre>' + '\n'.join(lines[-50:]) + '</pre>'
     except Exception as e:
-        return f'<pre>Error reading log: {e}</pre>'
+        return f'<pre>Error: {e}</pre>'
 
 
 @app.errorhandler(500)
@@ -61,13 +64,14 @@ def internal_error(e):
 @app.route('/debug')
 def debug_route():
     try:
-        from analyzer import parse_excel, analyze, parse_historical
         import sys
         info = [
             f'Python: {sys.version}',
             f'pandas: {__import__("pandas").__version__}',
             f'openpyxl: {__import__("openpyxl").__version__}',
             'Imports OK',
+            f'Results dir: {RESULT_DIR}',
+            f'Files: {list(RESULT_DIR.glob("*"))}',
         ]
         return '<pre>' + '\n'.join(info) + '</pre>'
     except Exception as e:
@@ -100,99 +104,6 @@ def index():
     return render_template('index.html')
 
 
-def _process_task(task_id, paths, cur_filename, prev_filenames, owner_name):
-    """Background processing — runs in thread so upload returns immediately."""
-    try:
-        with task_lock:
-            task_store[task_id]['status'] = 'processing'
-
-        _log_error(task_id, f'Start: file={cur_filename}')
-        df, csat_df, metrics, csat_quality_raw = parse_excel(paths['cur'])
-        _log_error(task_id, f'Parsed: {len(df)} rows')
-
-        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
-        _log_error(task_id, 'Analyzed OK')
-
-        prev_stats_list = []
-        for ppath in paths.get('prev', []):
-            pdf, pcsat, pmetrics, pquality = parse_excel(ppath)
-            prev_stats_list.append(analyze(pdf, pcsat, pmetrics, pquality))
-
-        historical_data = None
-        if paths.get('hist'):
-            try:
-                from analyzer import parse_historical
-                historical_data = parse_historical(paths['hist'])
-            except Exception:
-                pass
-
-        current_stats = compute_comparisons(current_stats, prev_stats_list)
-
-        if owner_name:
-            df2, csat_df2, metrics2, quality2 = parse_excel(paths['cur'])
-            if 'Owner' in df2.columns:
-                df2 = df2[df2['Owner'].str.contains(owner_name, na=False, case=False)]
-            elif 'Individual' in df2.columns:
-                df2 = df2[df2['Individual'].str.contains(owner_name, na=False, case=False)]
-            current_stats = analyze(df2, csat_df2, metrics2, quality2)
-            if paths.get('prev'):
-                prev_owner = []
-                for ppath in paths['prev']:
-                    pdf2, pcsat2, pm2, pq2 = parse_excel(ppath)
-                    if 'Owner' in pdf2.columns:
-                        pdf2 = pdf2[pdf2['Owner'].str.contains(owner_name, na=False, case=False)]
-                    elif 'Individual' in pdf2.columns:
-                        pdf2 = pdf2[pdf2['Individual'].str.contains(owner_name, na=False, case=False)]
-                    prev_owner.append(analyze(pdf2, pcsat2, pm2, pq2))
-                current_stats = compute_comparisons(current_stats, prev_owner)
-
-        try:
-            current_stats['monthly_summary'] = generate_monthly_summary(current_stats)
-        except Exception as e:
-            current_stats['monthly_summary'] = f'Summary failed: {e}'
-
-        try:
-            from datetime import datetime, timedelta
-            end_str = current_stats.get('date_range', {}).get('end', '')
-            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
-            ll = (end_dt.replace(day=1) - timedelta(days=1)).strftime("%b'%y")
-        except Exception:
-            ll = ''
-        try:
-            current_stats['analysis_summary_line'] = generate_analysis_line(current_stats, ll)
-        except Exception:
-            current_stats['analysis_summary_line'] = ''
-
-        analysis_id = uuid.uuid4().hex
-        analysis_store[analysis_id] = {
-            'stats': current_stats,
-            'filename': cur_filename,
-            'prev_filenames': prev_filenames,
-            'has_comparison': current_stats.get('has_comparison', False),
-            'owner_name': owner_name,
-            'historical': historical_data,
-        }
-
-        with task_lock:
-            task_store[task_id]['status'] = 'done'
-            task_store[task_id]['analysis_id'] = analysis_id
-        _log_error(task_id, 'Done')
-
-    except Exception as e:
-        tb = traceback.format_exc()
-        _log_error(task_id, tb)
-        with task_lock:
-            task_store[task_id]['status'] = 'error'
-            task_store[task_id]['error'] = str(e)[:500]
-    finally:
-        for p in paths.values():
-            if isinstance(p, str):
-                Path(p).unlink(missing_ok=True)
-            elif isinstance(p, list):
-                for pp in p:
-                    Path(pp).unlink(missing_ok=True)
-
-
 @app.route('/upload', methods=['POST'])
 @require_auth
 def upload():
@@ -200,16 +111,13 @@ def upload():
     if not cur_file or not cur_file.filename.endswith(('.xlsx', '.xls')):
         return redirect(url_for('index', error='请上传当月报告文件'))
 
-    paths = {}
-    prev_filenames = []
-
     # Save current file
     cur_path = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
     cur_file.save(str(cur_path))
-    paths['cur'] = str(cur_path)
 
     # Save previous files
     prev_paths = []
+    prev_filenames = []
     for i in range(1, 4):
         pf = request.files.get(f'prev_file_{i}')
         if pf and pf.filename.endswith(('.xlsx', '.xls')):
@@ -217,28 +125,36 @@ def upload():
             pf.save(str(ppath))
             prev_paths.append(str(ppath))
             prev_filenames.append(pf.filename)
-    paths['prev'] = prev_paths
 
     # Save historical
+    hist_path = None
     hist_file = request.files.get('hist_file')
     if hist_file and hist_file.filename.endswith(('.xlsx', '.xls')):
         hpath = UPLOAD_DIR / f'{uuid.uuid4().hex}.xlsx'
         hist_file.save(str(hpath))
-        paths['hist'] = str(hpath)
+        hist_path = str(hpath)
 
     owner_name = request.form.get('owner_name', '').strip() or None
 
-    # Create task and start background thread
+    # Create task — status stored in result file
     task_id = uuid.uuid4().hex
-    with task_lock:
-        task_store[task_id] = {'status': 'pending'}
+    status_file = RESULT_DIR / f'{task_id}_status.json'
+    status_file.write_text(json.dumps({'status': 'pending', 'analysis_id': '', 'error': ''}))
 
-    thread = threading.Thread(
-        target=_process_task,
-        args=(task_id, paths, cur_file.filename, prev_filenames, owner_name),
-        daemon=True
-    )
-    thread.start()
+    # Build command for subprocess worker
+    cmd = [
+        sys.executable, str(Path(__file__).parent / 'process_worker.py'),
+        task_id, str(cur_path),
+    ]
+    for pp in prev_paths:
+        cmd.append(pp)
+    if hist_path:
+        cmd.extend(['--hist', hist_path])
+    if owner_name:
+        cmd.extend(['--owner', owner_name])
+
+    # Run processing in subprocess (completely independent of gunicorn)
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     return redirect(url_for('processing', task_id=task_id), code=303)
 
@@ -246,7 +162,7 @@ def upload():
 @app.route('/processing/<task_id>')
 @require_auth
 def processing(task_id):
-    if task_id not in task_store:
+    if _get_task(task_id) is None:
         return redirect(url_for('index', error='任务已过期，请重新上传'))
     return render_template('processing.html', task_id=task_id)
 
@@ -254,20 +170,16 @@ def processing(task_id):
 @app.route('/api/status/<task_id>')
 @require_auth
 def task_status(task_id):
-    task = task_store.get(task_id)
+    task = _get_task(task_id)
     if not task:
         return jsonify({'status': 'error', 'error': '任务不存在'}), 404
-    return jsonify({
-        'status': task['status'],
-        'analysis_id': task.get('analysis_id', ''),
-        'error': task.get('error', ''),
-    })
+    return jsonify(task)
 
 
 @app.route('/dashboard/<analysis_id>')
 @require_auth
 def dashboard(analysis_id):
-    data = analysis_store.get(analysis_id)
+    data = _get_analysis(analysis_id)
     if not data:
         return redirect(url_for('index', error='分析结果已过期，请重新上传'))
     return render_template('dashboard.html',
@@ -283,7 +195,7 @@ def dashboard(analysis_id):
 @app.route('/api/ai-analysis/<analysis_id>', methods=['POST'])
 @require_auth
 def ai_analysis(analysis_id):
-    data = analysis_store.get(analysis_id)
+    data = _get_analysis(analysis_id)
     if not data:
         return jsonify({'error': '分析结果不存在'}), 404
 
@@ -312,7 +224,7 @@ def ai_analysis(analysis_id):
 @app.route('/api/stats/<analysis_id>')
 @require_auth
 def get_stats(analysis_id):
-    data = analysis_store.get(analysis_id)
+    data = _get_analysis(analysis_id)
     if not data:
         return jsonify({'error': 'Not found'}), 404
     return jsonify(data['stats'])
@@ -321,7 +233,7 @@ def get_stats(analysis_id):
 @app.route('/api/report/<analysis_id>')
 @require_auth
 def download_report(analysis_id):
-    data = analysis_store.get(analysis_id)
+    data = _get_analysis(analysis_id)
     if not data:
         return redirect(url_for('index', error='分析结果已过期，请重新上传'))
 
