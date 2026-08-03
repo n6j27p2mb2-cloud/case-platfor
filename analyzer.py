@@ -252,19 +252,25 @@ def _parse_metrics_sheet(metrics_df, hrops_df, csat_df):
 
     # SLA from HROps
     if 'sla_compliance' not in result and 'SLA Met Flag' in hrops_df.columns:
-        sla_col = hrops_df['SLA Met Flag'].dropna()
+        sla_col = pd.to_numeric(hrops_df['SLA Met Flag'], errors='coerce').dropna()
+        if len(sla_col) == 0:
+            sla_mapped = hrops_df['SLA Met Flag'].map({'Yes': 1, 'No': 0, 'yes': 1, 'no': 0, 'Y': 1, 'N': 0})
+            sla_col = pd.to_numeric(sla_mapped, errors='coerce').dropna()
         if len(sla_col) > 0:
             result['sla_compliance'] = round(sla_col.mean() * 100, 2)
 
     # FTF
     if 'ftf_rate' not in result and 'FTF' in hrops_df.columns:
-        ftf_col = hrops_df['FTF'].dropna()
+        ftf_col = pd.to_numeric(hrops_df['FTF'], errors='coerce').dropna()
+        if len(ftf_col) == 0:
+            ftf_mapped = hrops_df['FTF'].map({'Yes': 1, 'No': 0, 'yes': 1, 'no': 0, 'Y': 1, 'N': 0})
+            ftf_col = pd.to_numeric(ftf_mapped, errors='coerce').dropna()
         if len(ftf_col) > 0:
             result['ftf_rate'] = round(ftf_col.mean() * 100, 2)
 
     # Reopen
     if 'reopen_rate' not in result and 'Reopen' in hrops_df.columns:
-        reopen_col = hrops_df['Reopen']
+        reopen_col = pd.to_numeric(hrops_df['Reopen'], errors='coerce')
         reopen_n = int(reopen_col.sum()) if reopen_col.notna().sum() > 0 else 0
         result['reopen_count'] = reopen_n
         result['reopen_rate'] = round(reopen_n / len(hrops_df) * 100, 2) if len(hrops_df) > 0 else 0
@@ -383,7 +389,11 @@ def analyze(df, csat_df=None, metrics=None, csat_quality_raw=None):
     csat_rr = m.get('csat_rr')
     sla_compliance = m.get('sla_compliance')
     if sla_compliance is None and 'SLA Met Flag' in df.columns:
-        sla_col = df['SLA Met Flag'].dropna()
+        sla_col = pd.to_numeric(df['SLA Met Flag'], errors='coerce').dropna()
+        if len(sla_col) == 0:
+            # Try mapping Yes/No → 1/0
+            sla_mapped = df['SLA Met Flag'].map({'Yes': 1, 'No': 0, 'yes': 1, 'no': 0, 'Y': 1, 'N': 0})
+            sla_col = pd.to_numeric(sla_mapped, errors='coerce').dropna()
         sla_compliance = round(sla_col.mean() * 100, 2) if len(sla_col) > 0 else None
 
     # CSAT from raw data if not in metrics
