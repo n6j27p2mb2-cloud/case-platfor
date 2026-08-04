@@ -202,6 +202,18 @@ def errors_log():
         return f'<pre>Error: {e}</pre>'
 
 
+@app.route('/cols-debug')
+def cols_debug():
+    """Show CSAT column detection debug info."""
+    try:
+        log_file = Path(__file__).parent / 'cols_debug.log'
+        if not log_file.exists():
+            return '<pre>No debug data yet. Upload a file first.</pre>'
+        return '<pre>' + log_file.read_text()[-5000:] + '</pre>'
+    except Exception as e:
+        return f'<pre>Error: {e}</pre>'
+
+
 @app.route('/api/ai-analysis/<analysis_id>', methods=['POST'])
 @require_auth
 def ai_analysis(analysis_id):

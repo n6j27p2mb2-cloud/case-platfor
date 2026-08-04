@@ -163,6 +163,16 @@ def parse_excel(filepath):
                 quality_cols['pers_serv'] = col
             elif any(kw in col_lower for kw in ['comm', 'clear']):
                 quality_cols['comm'] = col
+        # DEBUG: log what we found
+        try:
+            from pathlib import Path
+            logf = Path(__file__).parent / 'cols_debug.log'
+            with open(logf, 'a') as f:
+                f.write(f'CSAT columns: {list(csat_df.columns)}\n')
+                f.write(f'Quality cols matched: {quality_cols}\n')
+                f.write('---\n')
+        except Exception:
+            pass
         if quality_cols:
             csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
 
