@@ -263,12 +263,60 @@
         <div class="grid-2">
             <div class="panel" id="origin-panel">
                 <h2>Case 来源构成</h2>
-                <canvas id="originChart" style="max-height:280px;"></canvas>
+                <canvas id="originChart" style="max-height:260px;"></canvas>
+                {% if stats.origin_comparisons %}
+                <table class="type-table" style="width:100%;margin-top:12px;">
+                    <thead><tr>
+                        <th>来源</th><th>当月</th><th>上月</th><th>增长量</th><th>增长率</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for o in stats.origin_comparisons %}
+                    <tr>
+                        <td><strong>{{ o.name }}</strong></td>
+                        <td>{{ o.current }}</td>
+                        <td>{% if o.last_count is defined %}{{ o.last_count }}{% else %}<span style="color:#d1d5db;">—</span>{% endif %}</td>
+                        <td>
+                            {% if o.delta is defined %}
+                            <span class="{{ 'delta-up' if o.delta > 0 else 'delta-down' }}" style="font-weight:500;">{{ '+' if o.delta > 0 else '' }}{{ o.delta }}</span>
+                            {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if o.delta_pct is defined %}
+                            <span class="{{ 'delta-up' if o.delta_pct > 0 else 'delta-down' }}" style="font-weight:500;">{{ '+' if o.delta_pct > 0 else '' }}{{ o.delta_pct }}%</span>
+                            {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
             </div>
             <div class="panel" id="quality-panel">
                 <h2>Solution Quality <span class="section-desc">CSAT 分项评分 · China</span></h2>
                 {% if stats.csat_quality %}
-                <canvas id="qualityChart" style="max-height:280px;"></canvas>
+                <canvas id="qualityChart" style="max-height:260px;"></canvas>
+                {% if stats.quality_comparisons %}
+                <table class="type-table" style="width:100%;margin-top:12px;">
+                    <thead><tr>
+                        <th>指标</th><th>当月%</th><th>上月%</th><th>变化</th><th>当月均分</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for key, qc in stats.quality_comparisons.items() %}
+                    <tr>
+                        <td><strong>{{ key }}</strong></td>
+                        <td>{{ qc.current_pct }}%</td>
+                        <td>{% if qc.last_pct is defined %}{{ qc.last_pct }}%{% else %}<span style="color:#d1d5db;">—</span>{% endif %}</td>
+                        <td>
+                            {% if qc.delta_pct is defined %}
+                            <span class="{{ 'delta-up' if qc.delta_pct > 0 else 'delta-down' }}" style="font-weight:500;">{{ '+' if qc.delta_pct > 0 else '' }}{{ qc.delta_pct }}pp</span>
+                            {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
+                        </td>
+                        <td style="color:#6b7280;">{{ qc.current_avg }}/5</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
                 {% else %}
                 <div style="text-align:center;color:#9ca3af;padding:40px;">CSAT 质量数据暂不可用<br><small>请确认 CSAT sheet 中包含 Interaction / Pers.Serv. / Comm. 列</small></div>
                 {% endif %}
@@ -338,13 +386,27 @@
                         <td>
                             {% if m.get('vs_3m_pct') is not none %}
                             {% if m.growth_tag == 'red' %}
-                            <span class="delta-up" style="font-weight:600;font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
-                            <span class="rank-badge rank-red">#{{ m.growth_rank }}</span>
+                                {% if m.vs_3m_pct > 0 %}
+                                <span class="delta-up" style="font-weight:600;font-size:10px;">+{{ m.vs_3m_pct }}%</span>
+                                <span class="rank-badge rank-red">#{{ m.growth_rank }}</span>
+                                {% else %}
+                                <span class="delta-down" style="font-weight:600;font-size:10px;">{{ m.vs_3m_pct }}%</span>
+                                <span class="rank-badge rank-red">#{{ m.growth_rank }}</span>
+                                {% endif %}
                             {% elif m.growth_tag == 'orange' %}
-                            <span class="delta-warn" style="font-weight:600;font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
-                            <span class="rank-badge rank-orange">#{{ m.growth_rank }}</span>
+                                {% if m.vs_3m_pct > 0 %}
+                                <span class="delta-warn" style="font-weight:600;font-size:10px;">+{{ m.vs_3m_pct }}%</span>
+                                <span class="rank-badge rank-orange">#{{ m.growth_rank }}</span>
+                                {% else %}
+                                <span class="delta-down" style="font-weight:600;font-size:10px;">{{ m.vs_3m_pct }}%</span>
+                                <span class="rank-badge rank-orange">#{{ m.growth_rank }}</span>
+                                {% endif %}
                             {% elif m.growth_tag == 'anomaly' %}
-                            <span class="delta-anomaly" style="font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
+                                {% if m.vs_3m_pct > 0 %}
+                                <span class="delta-anomaly" style="font-size:10px;">+{{ m.vs_3m_pct }}%</span>
+                                {% else %}
+                                <span class="delta-down" style="font-size:10px;">{{ m.vs_3m_pct }}%</span>
+                                {% endif %}
                             {% else %}
                             <span style="color:#9ca3af;font-size:10px;">{{ '+' if m.vs_3m_pct > 0 else '' }}{{ m.vs_3m_pct }}%</span>
                             {% endif %}
@@ -574,67 +636,74 @@ new Chart(document.getElementById('originChart'), {
     }
 });
 
-// ── Solution Quality Chart (line, Y-axis tight to show differences) ──
+// ── Solution Quality Chart (grouped bar: 当月/上月/前月) ──
 {% if stats.csat_quality %}
 var qualityData = {{ stats.csat_quality | tojson }};
+var prevQuality = {{ stats.prev_months_quality | tojson }};
 var qOrder = ['Service Professionalism', 'Solution Quality', 'Clear Communication'];
 var qLabels = qOrder.filter(function(k) { return qualityData[k] !== undefined; });
 var qValues = qLabels.map(function(k) { return qualityData[k].pct; });
-var qPointColors = ['#0891b2', '#4f46e5', '#10b981'];
-var qYMin = Math.min.apply(null, qValues);
-var qYMax = Math.max.apply(null, qValues);
-var qRange = qYMax - qYMin || 1;
-var qPad = Math.max(qRange * 0.6, 1);
-var qAxisMin = Math.max(0, Math.floor(qYMin - qPad));
-var qAxisMax = Math.min(100, Math.ceil(qYMax + qPad));
-var qStep = Math.max(0.5, Math.round(qRange / 6 * 10) / 10);
+
+// Build datasets: 当月, 上月, 前月
+var qDatasets = [{
+    label: '当月',
+    data: qValues,
+    backgroundColor: '#4f46e5',
+    borderRadius: 3,
+}];
+var qBarColors = ['#7c3aed', '#a78bfa'];
+for (var pi = 0; pi < prevQuality.length && pi < 2; pi++) {
+    var pq = prevQuality[pi];
+    var monthLabel = pi === 0 ? '上月' : '前月';
+    var pvals = qLabels.map(function(k) { return pq[k] ? pq[k].pct : null; });
+    qDatasets.push({
+        label: monthLabel,
+        data: pvals,
+        backgroundColor: qBarColors[pi],
+        borderRadius: 3,
+    });
+}
+
+// Dynamic Y range: compute across all datasets
+var allQVals = [];
+qDatasets.forEach(function(ds) {
+    ds.data.forEach(function(v) { if (v != null) allQVals.push(v); });
+});
+var qYMin2 = Math.min.apply(null, allQVals);
+var qYMax2 = Math.max.apply(null, allQVals);
+var qRange2 = qYMax2 - qYMin2 || 1;
+var qPad2 = Math.max(qRange2 * 0.6, 2);
+var qAxisMin2 = Math.max(0, Math.floor(qYMin2 - qPad2));
+var qAxisMax2 = Math.min(100, Math.ceil(qYMax2 + qPad2 * 0.4));
+var qStep2 = Math.max(0.5, Math.round(qRange2 / 5 * 10) / 10);
 
 new Chart(document.getElementById('qualityChart'), {
-    type: 'line',
-    data: {
-        labels: qLabels,
-        datasets: [{
-            label: 'Score %',
-            data: qValues,
-            borderColor: '#4f46e5',
-            backgroundColor: 'rgba(79,70,229,0.04)',
-            borderWidth: 2,
-            pointRadius: 5,
-            pointBackgroundColor: qPointColors.slice(0, qLabels.length),
-            pointBorderColor: '#fff',
-            pointBorderWidth: 2,
-            tension: 0.15,
-            fill: true,
-        }]
-    },
+    type: 'bar',
+    data: { labels: qLabels, datasets: qDatasets },
     options: {
         responsive: true, maintainAspectRatio: false,
-        layout: { padding: { left: 10, right: 10 } },
         plugins: {
-            legend: { display: false },
+            legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true } },
             tooltip: { callbacks: {
                 label: function(ctx) {
                     var k = qLabels[ctx.dataIndex];
                     var d = qualityData[k];
-                    return k + ': ' + d.pct + '% (avg ' + d.avg + '/5, n=' + d.count + ')';
+                    var suffix = ctx.dataset.label === '当月' && d ? ' (avg ' + d.avg + '/5, n=' + d.count + ')' : '';
+                    return ctx.dataset.label + ': ' + (ctx.parsed.y != null ? ctx.parsed.y + '%' : '—') + suffix;
                 }
             }}
         },
         scales: {
             y: {
-                min: qAxisMin, max: qAxisMax,
+                min: qAxisMin2, max: qAxisMax2,
                 ticks: {
-                    stepSize: qStep,
+                    stepSize: qStep2,
                     font: { size: 11 },
                     callback: function(v) { return v.toFixed(1) + '%'; }
                 },
                 grid: { drawBorder: false, color: 'rgba(0,0,0,0.06)' }
             },
-            x: {
-                offset: true,
-                grid: { display: false },
-                ticks: { font: { size: 11 }, padding: 4 }
-            }
+            x: { grid: { display: false }, ticks: { font: { size: 11 } } }
         }
     }
 });
@@ -701,28 +770,13 @@ if (histCase.length > 0) {
     function fmtMonth(m) {
         if (!m) return '';
         var s = String(m).trim();
-        // Already YYYYMM
-        if (/^\d{6}$/.test(s)) return s;
-        if (/^\d{4}-\d{2}$/.test(s)) return s.replace('-','');
-        if (/^\d{4}\/\d{2}$/.test(s)) return s.replace('/','');
-        // Mon-YY e.g. "Jan-26", "Feb-26"
-        var monMap = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
-        var m1 = s.match(/^([A-Za-z]{3})[- ](\d{2})$/);
-        if (m1) {
-            var mn = m1[1].toLowerCase();
-            if (monMap[mn]) return '20' + m1[2] + monMap[mn];
-        }
-        // MonYY without dash e.g. "Jun25", "Jan26"
-        var m2 = s.match(/^([A-Za-z]{3})(\d{2})$/);
-        if (m2) {
-            var mn2 = m2[1].toLowerCase();
-            if (monMap[mn2]) return '20' + m2[2] + monMap[mn2];
-        }
-        // Try Date parse last
-        var d = new Date(s);
-        if (!isNaN(d) && d.getFullYear() > 2000) {
-            return String(d.getFullYear()) + String(d.getMonth()+1).padStart(2,'0');
-        }
+        // Python _fmt_month already outputs "Jun2025", just pass through
+        if (/^[A-Za-z]{3}\d{4}$/.test(s)) return s;
+        // Fallback: handle any legacy formats
+        var m1 = s.match(/^(\d{4})-(\d{2})-\d{2}/);
+        if (m1) { var mi = parseInt(m1[2], 10); return ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][mi] + m1[1]; }
+        var m2 = s.match(/^(\d{4})(\d{2})$/);
+        if (m2) { var mj = parseInt(m2[2], 10); return ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][mj] + m2[1]; }
         return s;
     }
 
@@ -765,6 +819,27 @@ if (histCase.length > 0) {
         tension: 0.2, pointRadius: 2, borderWidth: 2,
     });
 
+    // Dynamic Y-axis ranges for percentage lines so variations are visible
+    var allY1 = [];
+    if (histSLA.length > 0) allY1 = allY1.concat(histSLA.map(function(d) { return d.value; }));
+    if (histFTF.length > 0) allY1 = allY1.concat(histFTF.map(function(d) { return d.value; }));
+    if (histCSAT.length > 0) allY1 = allY1.concat(histCSAT.map(function(d) { return d.value; }));
+    var y1Min = allY1.length > 0 ? Math.min.apply(null, allY1) : 90;
+    var y1Max = allY1.length > 0 ? Math.max.apply(null, allY1) : 100;
+    var y1Range = y1Max - y1Min || 0.5;
+    var y1Pad = Math.max(y1Range * 0.8, 0.3);
+    var y1AxisMin = Math.max(0, Math.floor((y1Min - y1Pad) * 10) / 10);
+    var y1AxisMax = Math.min(100, Math.ceil((y1Max + y1Pad * 0.5) * 10) / 10);
+
+    var allY2 = [];
+    if (histRR.length > 0) allY2 = histRR.map(function(d) { return d.value; });
+    var y2Min = allY2.length > 0 ? Math.min.apply(null, allY2) : 0;
+    var y2Max = allY2.length > 0 ? Math.max.apply(null, allY2) : 100;
+    var y2Range = y2Max - y2Min || 1;
+    var y2Pad = Math.max(y2Range * 0.8, 1);
+    var y2AxisMin = Math.max(0, Math.floor(y2Min - y2Pad));
+    var y2AxisMax = Math.min(100, Math.ceil(y2Max + y2Pad * 0.5));
+
     new Chart(document.getElementById('trendOverview'), {
         type: 'bar',
         data: { labels: histCase.map(function(d) { return fmtMonth(d.month); }), datasets: overviewDatasets },
@@ -792,15 +867,17 @@ if (histCase.length > 0) {
                 },
                 y1: {
                     position: 'right', type: 'linear',
+                    min: y1AxisMin, max: y1AxisMax,
                     grid: { drawOnChartArea: false },
                     title: { display: true, text: 'SLA / FTF / CSAT %', font: { size: 9 } },
-                    ticks: { font: { size: 9 }, callback: function(v) { return v + '%'; } }
+                    ticks: { font: { size: 9 }, callback: function(v) { return v.toFixed(1) + '%'; } }
                 },
                 y2: {
                     position: 'right', type: 'linear',
+                    min: y2AxisMin, max: y2AxisMax,
                     grid: { drawOnChartArea: false },
                     title: { display: true, text: 'RR %', font: { size: 9 } },
-                    ticks: { font: { size: 9 }, callback: function(v) { return v + '%'; } }
+                    ticks: { font: { size: 9 }, callback: function(v) { return v.toFixed(1) + '%'; } }
                 },
                 x: { ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: false } }
             }

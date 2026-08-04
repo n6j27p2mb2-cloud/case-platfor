@@ -577,6 +577,47 @@ def compute_comparisons(current, prev_months):
         elif m.get('vs_3m_pct') is not None and abs(m['vs_3m_pct']) >= 50:
             m['growth_tag'] = 'anomaly'
 
+    # ── Origin distribution comparison ──
+    current['origin_comparisons'] = []
+    lm_origins = {o['name']: o for o in last_month.get('origin_distribution', [])}
+    for o in current.get('origin_distribution', []):
+        oc = {'name': o['name'], 'current': o['count'], 'current_pct': o['percentage']}
+        if o['name'] in lm_origins:
+            lm = lm_origins[o['name']]
+            oc['last_count'] = lm['count']
+            oc['delta'] = o['count'] - lm['count']
+            oc['delta_pct'] = round((o['count'] - lm['count']) / lm['count'] * 100, 1) if lm['count'] > 0 else None
+        prev_counts = []
+        for pm in prev_months:
+            for po in pm.get('origin_distribution', []):
+                if po['name'] == o['name']:
+                    prev_counts.append(po['count'])
+        if prev_counts:
+            oc['avg_3m'] = round(sum(prev_counts) / len(prev_counts), 1)
+            oc['vs_3m_diff'] = round(o['count'] - oc['avg_3m'], 1)
+            oc['vs_3m_pct'] = round((o['count'] - oc['avg_3m']) / oc['avg_3m'] * 100, 1) if oc['avg_3m'] > 0 else None
+        current['origin_comparisons'].append(oc)
+
+    # ── CSAT Quality comparison ──
+    current['quality_comparisons'] = {}
+    lm_quality = last_month.get('csat_quality', {})
+    for key, val in current.get('csat_quality', {}).items():
+        qc = {'current_avg': val['avg'], 'current_pct': val['pct'], 'current_count': val['count']}
+        if key in lm_quality:
+            lmv = lm_quality[key]
+            qc['last_pct'] = lmv['pct']
+            qc['last_avg'] = lmv['avg']
+            qc['delta_pct'] = round(val['pct'] - lmv['pct'], 1)
+            qc['delta_avg'] = round(val['avg'] - lmv['avg'], 2)
+        current['quality_comparisons'][key] = qc
+
+    # ── Prev months quality (for grouped bar chart) ──
+    current['prev_months_quality'] = []
+    for pm in prev_months:
+        pq = pm.get('csat_quality', {})
+        if pq:
+            current['prev_months_quality'].append(pq)
+
     # ── Hotspot detection (两层逻辑) ──
     current['hotspots'] = _detect_hotspots(current, min_base=30, min_growth_pct=20)
 
@@ -757,6 +798,40 @@ def _subtype_ranking(type_hierarchy, total, threshold=30):
     return all_subtypes
 
 
+def _fmt_month(val):
+    """Normalize any month representation to 'Jun2025' format."""
+    import datetime as _dt
+    if isinstance(val, (_dt.datetime, pd.Timestamp)):
+        return val.strftime('%b%Y')
+    s = str(val).strip()
+    # Try common string patterns
+    import re
+    # "2025-06-01 ..." (pandas Timestamp str)
+    m = re.match(r'(\d{4})-(\d{2})-\d{2}', s)
+    if m:
+        from calendar import month_abbr
+        mi = int(m.group(2))
+        return month_abbr[mi] + m.group(1)
+    # Already "Jun2025"
+    if re.match(r'^[A-Za-z]{3}\d{4}$', s):
+        return s
+    # "Jun-25" or "Jun 25"
+    m = re.match(r'([A-Za-z]{3})[- ](\d{2})$', s)
+    if m:
+        return m.group(1).capitalize() + '20' + m.group(2)
+    # "Jun25"
+    m = re.match(r'([A-Za-z]{3})(\d{2})$', s)
+    if m:
+        return m.group(1).capitalize() + '20' + m.group(2)
+    # "202506"
+    m = re.match(r'(\d{4})(\d{2})$', s)
+    if m:
+        from calendar import month_abbr
+        mi = int(m.group(2))
+        return month_abbr[mi] + m.group(1)
+    return s
+
+
 def parse_historical(filepath):
     """Parse the 12-months historical metrics file. Returns {metric: [{month, china_value}, ...]}."""
     df = pd.read_excel(filepath, sheet_name='12months', header=None)
@@ -771,12 +846,12 @@ def parse_historical(filepath):
         'csat_rr': 41,
     }
 
-    # Months are in row 2, cols 1-13
+    # Months are in row 2, cols 1-13 — normalize to "Jun2025" format
     months = []
     for c in range(1, 14):
         month_val = df.iloc[2, c]
         if pd.notna(month_val):
-            months.append(str(month_val))
+            months.append(_fmt_month(month_val))
 
     result = {}
     for section_name, header_row in sections.items():
