@@ -157,6 +157,9 @@ def parse_excel(filepath):
         quality_cols = {}
         for col in csat_df.columns:
             col_lower = str(col).strip().lower()
+            # Skip free-text comment columns
+            if 'comment' in col_lower or 'feedback' in col_lower:
+                continue
             if any(kw in col_lower for kw in ['interaction', 'interact', 'quality', 'solution']):
                 quality_cols['interaction'] = col
             elif any(kw in col_lower for kw in ['pers', 'profession', 'serv']):
