@@ -1,5 +1,7 @@
 import re
 import warnings
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from collections import Counter, defaultdict
@@ -97,20 +99,55 @@ def _fmt_duration(sec):
 # ── Parse ───────────────────────────────────────────────────────────────────────
 
 def parse_excel(filepath):
-    """Parse a monthly HR Ops report. Returns (df, csat_df, metrics_dict) for China only."""
-    # Read HROps sheet with only needed columns to save memory on Render
-    needed_cols = ['GEO', 'Created', 'FirstCloseDate', 'CaseType', 'Origin',
-                   'FirstCloseResolution', 'Owner', 'Individual',
-                   'Title', 'SLA Met Flag', 'FTF', 'Reopen']
-    # First peek to get available columns
-    df_peek = pd.read_excel(filepath, sheet_name='HROps', nrows=0, engine='openpyxl')
-    avail_cols = list(df_peek.columns)
-    read_cols = [c for c in needed_cols if c in avail_cols]
-    df = pd.read_excel(filepath, sheet_name='HROps', usecols=read_cols, engine='openpyxl')
+    """Parse a monthly HR Ops report OR New Case Query export.
+    Auto-detects format and normalizes columns.
+    Returns (df, csat_df, metrics_dict, csat_quality_raw) for China / Sammi."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
 
-    # Filter China only
-    if 'GEO' in df.columns:
-        df = df[df['GEO'] == 'China'].copy()
+        # ── Detect sheet name ──
+        xls = pd.ExcelFile(filepath, engine='openpyxl')
+        sheet_names = xls.sheet_names
+
+        # ── Detect format: HR Ops (HROps) vs New Case Query (Sheet 1 / Sheet0) ──
+        is_hr_ops = 'HROps' in sheet_names
+
+        if is_hr_ops:
+            # ─── HR Ops Format ───
+            needed_cols = ['GEO', 'Created', 'FirstCloseDate', 'CaseType', 'Origin',
+                           'FirstCloseResolution', 'Owner', 'Individual',
+                           'Title', 'SLA Met Flag', 'FTF', 'Reopen']
+            df_peek = pd.read_excel(xls, sheet_name='HROps', nrows=0)
+            avail_cols = list(df_peek.columns)
+            read_cols = [c for c in needed_cols if c in avail_cols]
+            df = pd.read_excel(xls, sheet_name='HROps', usecols=read_cols)
+
+            if 'GEO' in df.columns:
+                df = df[df['GEO'] == 'China'].copy()
+        else:
+            # ─── New Case Query Format (Salesforce export) ───
+            main_sheet = sheet_names[0]
+            df = pd.read_excel(xls, sheet_name=main_sheet)
+
+            # Map columns to internal names expected by analyzer
+            col_map = {}
+            actual_cols = list(df.columns)
+            # CaseType
+            if 'Case Type' in actual_cols and 'CaseType' not in actual_cols:
+                col_map['Case Type'] = 'CaseType'
+            # Resolution
+            if 'Last Close Resolution' in actual_cols and 'FirstCloseResolution' not in actual_cols:
+                col_map['Last Close Resolution'] = 'FirstCloseResolution'
+            # Owner
+            if 'Owner Login Name' in actual_cols and 'Owner' not in actual_cols:
+                col_map['Owner Login Name'] = 'Owner'
+            # Created
+            if 'Created' in actual_cols:
+                pass  # already correct
+            df.rename(columns=col_map, inplace=True)
+
+    # ── Common processing (both formats) ──
 
     # Normalize dates
     for col in ['Created', 'FirstCloseDate']:
@@ -122,6 +159,9 @@ def parse_excel(filepath):
         parsed = df['CaseType'].apply(_simplify_case_type)
         df['_case_major'] = parsed.apply(lambda x: x[0])
         df['_case_minor'] = parsed.apply(lambda x: x[1])
+    else:
+        df['_case_major'] = 'Unknown'
+        df['_case_minor'] = 'Unknown'
 
     # Origin classification
     if 'Origin' in df.columns:
@@ -132,62 +172,66 @@ def parse_excel(filepath):
         df['_resolution'] = df['FirstCloseResolution'].apply(_classify_resolution)
 
     # Is Non-HR
-    df['_is_non_hr'] = df['CaseType'].apply(
-        lambda x: str(x).startswith('Non-HR') if pd.notna(x) else False
-    )
+    if 'CaseType' in df.columns:
+        df['_is_non_hr'] = df['CaseType'].apply(
+            lambda x: str(x).startswith('Non-HR') if pd.notna(x) else False
+        )
+    else:
+        df['_is_non_hr'] = False
 
-    # ── CSAT sheet (China only) ──
+    # ── CSAT sheet (HR Ops only) ──
     csat_df = None
     csat_quality_raw = None
-    try:
-        csat_peek = pd.read_excel(filepath, sheet_name='CSAT', nrows=0, engine='openpyxl')
-    except ValueError:
-        csat_peek = None
 
-    if csat_peek is not None:
-        csat_avail = list(csat_peek.columns)
-        csat_read = [c for c in needed_cols if c in csat_avail]
-        # Also read quality-related columns
-        quality_col_names = [c for c in csat_avail
-                            if any(kw in str(c).lower() for kw in ['quality', 'interact', 'pers', 'profession', 'serv', 'comm', 'clear'])]
-        all_csat_cols = list(set(csat_read + quality_col_names))
-        csat_df = pd.read_excel(filepath, sheet_name='CSAT', usecols=all_csat_cols, engine='openpyxl')
-        if 'GEO' in csat_df.columns:
-            csat_df = csat_df[csat_df['GEO'] == 'China'].copy()
-        quality_cols = {}
-        for col in csat_df.columns:
-            col_lower = str(col).strip().lower()
-            # Skip free-text comment columns
-            if 'comment' in col_lower or 'feedback' in col_lower:
-                continue
-            if any(kw in col_lower for kw in ['interaction', 'interact', 'quality', 'solution']):
-                quality_cols['interaction'] = col
-            elif any(kw in col_lower for kw in ['pers', 'profession', 'serv']):
-                quality_cols['pers_serv'] = col
-            elif any(kw in col_lower for kw in ['comm', 'clear']):
-                quality_cols['comm'] = col
-        # DEBUG: log what we found
+    if is_hr_ops and 'CSAT' in sheet_names:
+        needed_cols = ['GEO', 'Created', 'FirstCloseDate', 'CaseType', 'Origin',
+                       'FirstCloseResolution', 'Owner', 'Individual',
+                       'Title', 'SLA Met Flag', 'FTF', 'Reopen']
         try:
-            from pathlib import Path
-            logf = Path(__file__).parent / 'cols_debug.log'
-            with open(logf, 'a') as f:
-                f.write(f'CSAT columns: {list(csat_df.columns)}\n')
-                f.write(f'Quality cols matched: {quality_cols}\n')
-                f.write('---\n')
-        except Exception:
-            pass
-        if quality_cols:
-            csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
+            csat_peek = pd.read_excel(xls, sheet_name='CSAT', nrows=0)
+        except ValueError:
+            csat_peek = None
 
-    # ── Metrics sheet ──
+        if csat_peek is not None:
+            csat_avail = list(csat_peek.columns)
+            csat_read = [c for c in needed_cols if c in csat_avail]
+            quality_col_names = [c for c in csat_avail
+                                if any(kw in str(c).lower() for kw in ['quality', 'interact', 'pers', 'profession', 'serv', 'comm', 'clear'])]
+            all_csat_cols = list(set(csat_read + quality_col_names))
+            csat_df = pd.read_excel(xls, sheet_name='CSAT', usecols=all_csat_cols)
+            if 'GEO' in csat_df.columns:
+                csat_df = csat_df[csat_df['GEO'] == 'China'].copy()
+            quality_cols = {}
+            for col in csat_df.columns:
+                col_lower = str(col).strip().lower()
+                if 'comment' in col_lower or 'feedback' in col_lower:
+                    continue
+                if any(kw in col_lower for kw in ['interaction', 'interact', 'quality', 'solution']):
+                    quality_cols['interaction'] = col
+                elif any(kw in col_lower for kw in ['pers', 'profession', 'serv']):
+                    quality_cols['pers_serv'] = col
+                elif any(kw in col_lower for kw in ['comm', 'clear']):
+                    quality_cols['comm'] = col
+            try:
+                logf = Path(__file__).parent / 'cols_debug.log'
+                with open(logf, 'a') as f:
+                    f.write(f'CSAT columns: {list(csat_df.columns)}\n')
+                    f.write(f'Quality cols matched: {quality_cols}\n')
+                    f.write('---\n')
+            except Exception:
+                pass
+            if quality_cols:
+                csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
+
+    # ── Metrics sheet (HR Ops only) ──
     metrics = {}
-    try:
-        metrics_df = pd.read_excel(filepath, sheet_name='Metrics', header=None, engine='openpyxl')
-    except ValueError:
-        metrics_df = None
-
-    if metrics_df is not None:
-        metrics = _parse_metrics_sheet(metrics_df, df, csat_df)
+    if is_hr_ops and 'Metrics' in sheet_names:
+        try:
+            metrics_df = pd.read_excel(xls, sheet_name='Metrics', header=None)
+        except ValueError:
+            metrics_df = None
+        if metrics_df is not None:
+            metrics = _parse_metrics_sheet(metrics_df, df, csat_df)
 
     return df, csat_df, metrics, csat_quality_raw
 
