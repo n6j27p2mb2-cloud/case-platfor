@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 from dotenv import load_dotenv
 
-from analyzer import parse_excel, analyze, compute_comparisons, generate_monthly_summary, prepare_ai_prompt, generate_analysis_line
+from analyzer import parse_excel, analyze, compute_comparisons, parse_matrix, generate_monthly_summary, prepare_ai_prompt, generate_analysis_line
 from report_gen import generate_report
 
 load_dotenv()
@@ -85,7 +85,6 @@ def upload():
     cur_filename = cur_file.filename
     try:
         df, csat_df, metrics, csat_quality_raw = parse_excel(str(cur_path))
-        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
 
         prev_stats_list = []
         for ppath in prev_paths:
@@ -93,14 +92,19 @@ def upload():
             prev_stats_list.append(analyze(pdf, pcsat, pmetrics, pquality))
 
         historical_data = None
+        kpi_history = None
         if hist_path:
             try:
-                from analyzer import parse_historical
-                historical_data = parse_historical(hist_path)
+                matrix_metrics, historical_data = parse_matrix(hist_path)
+                if matrix_metrics:
+                    metrics.update(matrix_metrics)
+                    if historical_data:
+                        kpi_history = historical_data
             except Exception:
                 pass
 
-        current_stats = compute_comparisons(current_stats, prev_stats_list)
+        current_stats = analyze(df, csat_df, metrics, csat_quality_raw)
+        current_stats = compute_comparisons(current_stats, prev_stats_list, kpi_history=kpi_history)
 
         if owner_name:
             df2, csat_df2, metrics2, quality2 = parse_excel(str(cur_path))

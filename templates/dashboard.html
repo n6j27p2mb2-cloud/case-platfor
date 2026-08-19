@@ -185,20 +185,20 @@
         <div class="kpi">
             <div class="kpi-left">
                 <div class="klabel">⭐ CSAT 满意度</div>
-                <div class="kvalue">{{ stats.csat_score if stats.csat_score else '—' }}/5</div>
+                <div class="kvalue">{{ stats.csat_score if stats.csat_score else '—' }}%</div>
             </div>
             <div class="kpi-right">
                 {% if cc.csat_score %}
                 <div class="kcomp">
                     <span class="kcomp-label">vs上月 </span>
                     {% if cc.csat_score.vs_last is not none %}
-                    <span class="{{ 'delta-up' if cc.csat_score.vs_last > 0 else 'delta-down' }}">{{ '+' if cc.csat_score.vs_last > 0 else '' }}{{ cc.csat_score.vs_last }}</span>
+                    <span class="{{ 'delta-up' if cc.csat_score.vs_last > 0 else 'delta-down' }}">{{ '+' if cc.csat_score.vs_last > 0 else '' }}{{ cc.csat_score.vs_last }}pp</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
                 <div class="kcomp">
                     <span class="kcomp-label">vs近三月 </span>
                     {% if cc.csat_score.vs_3m_diff is not none %}
-                    <span class="{{ 'delta-up' if cc.csat_score.vs_3m_diff > 0 else 'delta-down' }}">{{ '+' if cc.csat_score.vs_3m_diff > 0 else '' }}{{ cc.csat_score.vs_3m_diff }}</span>
+                    <span class="{{ 'delta-up' if cc.csat_score.vs_3m_diff > 0 else 'delta-down' }}">{{ '+' if cc.csat_score.vs_3m_diff > 0 else '' }}{{ cc.csat_score.vs_3m_diff }}pp</span>
                     {% else %}<span style="color:#d1d5db;">—</span>{% endif %}
                 </div>
                 {% endif %}
@@ -621,11 +621,17 @@ if (firstHR) renderDrill(firstHR);
 // ── Case Source Origin Donut ──
 const originData = {{ stats.origin_distribution | tojson }};
 const origTotal = originData.reduce((s,d) => s+d.count, 0);
+const ORIGIN_COLORS = {
+    'Chat': '#6d28d9',             // 深紫
+    'Email': '#2563eb',            // 深蓝
+    'HROA/Workday单据': '#a78bfa', // 淡紫
+};
+const originColors = originData.map(d => ORIGIN_COLORS[d.name] || '#6b7280');
 new Chart(document.getElementById('originChart'), {
     type: 'doughnut',
     data: {
         labels: originData.map(d => d.name),
-        datasets: [{ data: originData.map(d => d.count), backgroundColor: COLORS, borderWidth: 0 }]
+        datasets: [{ data: originData.map(d => d.count), backgroundColor: originColors, borderWidth: 0 }]
     },
     options: {
         responsive: true,
@@ -644,14 +650,9 @@ var qOrder = ['Service Professionalism', 'Solution Quality', 'Clear Communicatio
 var qLabels = qOrder.filter(function(k) { return qualityData[k] !== undefined; });
 var qValues = qLabels.map(function(k) { return qualityData[k].pct; });
 
-// Build datasets: 当月, 上月, 前月
-var qDatasets = [{
-    label: '当月',
-    data: qValues,
-    backgroundColor: '#4f46e5',
-    borderRadius: 3,
-}];
-var qBarColors = ['#7c3aed', '#a78bfa'];
+// Build datasets: 上月/前月 (淡色) 在前，当月 (最深色) 最后 → 显示在最右
+var qDatasets = [];
+var qBarColors = ['#c4b5fd', '#ddd6fe'];
 for (var pi = 0; pi < prevQuality.length && pi < 2; pi++) {
     var pq = prevQuality[pi];
     var monthLabel = pi === 0 ? '上月' : '前月';
@@ -663,6 +664,12 @@ for (var pi = 0; pi < prevQuality.length && pi < 2; pi++) {
         borderRadius: 3,
     });
 }
+qDatasets.push({
+    label: '当月',
+    data: qValues,
+    backgroundColor: '#6d28d9',
+    borderRadius: 3,
+});
 
 // Dynamic Y range: compute across all datasets
 var allQVals = [];

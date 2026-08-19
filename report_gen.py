@@ -222,7 +222,7 @@ def generate_report(stats, filename, has_comparison=False):
     kpi_values = [
         str(stats['total_cases']), str(stats['hr_count']), str(stats['non_hr_count']),
         str(stats['duplicate_count']), str(stats['third_party_count']),
-        sla_str, f"{stats.get('csat_score', '—')}/5" if stats.get('csat_score') else '—',
+        sla_str, f"{stats.get('csat_score', '—')}%" if stats.get('csat_score') else '—',
     ]
     for i, h in enumerate(kpi_headers):
         kpi_table.rows[0].cells[i].text = h

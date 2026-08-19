@@ -50,17 +50,15 @@ def _simplify_case_type(ct):
 
 
 def _classify_origin(origin):
-    """Normalize origin to: Chat / Email / Manual / Other."""
+    """Normalize origin to: Chat / Email / HROA/Workday单据."""
     if pd.isna(origin):
-        return 'Other'
+        return 'HROA/Workday单据'
     s = str(origin).strip().lower()
-    if 'chat' in s:
+    if 'chat' in s or 'manual' in s:
         return 'Chat'
     if 'email' in s:
         return 'Email'
-    if 'manual' in s:
-        return 'Chat'
-    return 'Other'
+    return 'HROA/Workday单据'
 
 
 def _extract_title_keywords(titles, top_n=15, min_count=40):
@@ -98,63 +96,173 @@ def _fmt_duration(sec):
 
 # ── Parse ───────────────────────────────────────────────────────────────────────
 
+# ── Column-name alias keys (lowercase substrings) ───────────────────────────────
+# Used to auto-detect columns regardless of exact export naming.
+
+_CASE_DETAIL_KEYS = {
+    'CaseID': ['caseid', 'case id', 'case number', 'casenumber', 'case no'],
+    'CaseType': ['casetype', 'case type', 'case_type', 'case category', 'category'],
+    'Created': ['created', 'create date', 'date created', 'created date', 'open date', 'opened'],
+    'Origin': ['origin', 'source', 'channel'],
+    'GEO': ['geo', 'region', 'geography'],
+    'Title': ['title', 'subject', 'summary'],
+    'FirstCloseResolution': ['first close resolution', 'last close resolution', 'close resolution', 'resolution'],
+    'Owner': ['owner login name', 'owner login', 'owner'],
+    'Individual': ['individual', 'assigned to', 'assignee'],
+    'SLA Met Flag': ['sla met flag', 'sla met', 'sla status'],
+    'FTF': ['ftf', 'fcf', 'first time fix', 'first contact fix', 'first time resolution'],
+    'Reopen': ['reopen'],
+    'Role': ['role', 'queue name', 'queue'],
+}
+
+_CSAT_SUB_KEYS = ['interaction', 'interact', 'solution quality', 'pers.serv', 'pers serv',
+                  'professionalism', 'serv', 'comm', 'clear']
+_CSAT_OVERALL_KEYS = ['avarage', 'average', 'satisfaction', 'survey result', 'csat score', 'csat']
+# Distinctive columns that reliably mark a CSAT sheet (avoid false positives like
+# "No CSAT Count" / "Average Time" on the main case sheet).
+_CSAT_SHEET_KEYS = ['interaction', 'interact', 'pers.serv', 'pers serv', 'avarage']
+_MONTH_KEYS = ['month', 'period', 'yearmonth', 'year-month']
+_KPI_KEYS = ['sla', 'ftf', 'fcf', 'response rate', 'case volume', 'csat rr', 'case count']
+
+
+def _norm(s):
+    return str(s).strip().lower()
+
+
+def _match_col(cols, keys):
+    """Return the first column whose lowercased name contains any key."""
+    for col in cols:
+        c = _norm(col)
+        if any(k in c for k in keys):
+            return col
+    return None
+
+
+def _classify_sheet(cols, sheet_name):
+    """Classify a sheet by its header content (not its name)."""
+    c = [_norm(x) for x in cols]
+    name = _norm(sheet_name)
+
+    has_month = any(any(k in x for k in _MONTH_KEYS) for x in c)
+    has_kpi = any(any(k in x for k in _KPI_KEYS) for x in c)
+    if has_month and has_kpi:
+        return 'matrix'
+
+    has_csat = any(any(k in x for k in _CSAT_SHEET_KEYS) for x in c)
+    if has_csat:
+        return 'csat'
+
+    if 'metric' in name or 'kpi' in name or any('target' in x for x in c):
+        return 'metrics_pivot'
+
+    has_casetype = any('casetype' in x or 'case type' in x for x in c)
+    has_caseid = any('caseid' in x or 'case id' in x or 'case number' in x for x in c)
+    has_created = any('created' in x for x in c)
+    if has_casetype or (has_caseid and has_created):
+        return 'case_detail'
+
+    return 'unknown'
+
+
+def _map_columns(cols, col_keys):
+    mapping = {}
+    for canonical, keys in col_keys.items():
+        col = _match_col(cols, keys)
+        if col is not None and col not in mapping:
+            mapping[col] = canonical
+    return mapping
+
+
+def _read_case_detail(xls, sheet, cols):
+    col_map = _map_columns(cols, _CASE_DETAIL_KEYS)
+    if not col_map:
+        return None
+    df = pd.read_excel(xls, sheet_name=sheet, usecols=list(col_map.keys()))
+    df = df.rename(columns=col_map)
+    if 'GEO' in df.columns:
+        df = df[df['GEO'].astype(str).str.strip() == 'China'].copy()
+    return df
+
+
+def _read_csat(xls, sheet, cols):
+    col_map = {}
+    overall_col = _match_col(cols, _CSAT_OVERALL_KEYS)
+    if overall_col is not None:
+        col_map[overall_col] = 'AVARAGE'
+    geo_col = _match_col(cols, _CASE_DETAIL_KEYS['GEO'])
+    if geo_col is not None:
+        col_map[geo_col] = 'GEO'
+
+    quality_cols = {}
+    for col in cols:
+        cn = _norm(col)
+        if 'comment' in cn or 'feedback' in cn:
+            continue
+        if any(k in cn for k in ['interaction', 'interact', 'solution quality']):
+            quality_cols.setdefault('interaction', col)
+        elif any(k in cn for k in ['pers', 'profession', 'serv']):
+            quality_cols.setdefault('pers_serv', col)
+        elif any(k in cn for k in ['comm', 'clear']):
+            quality_cols.setdefault('comm', col)
+    for col in quality_cols.values():
+        if col not in col_map:
+            col_map[col] = col
+
+    if not col_map:
+        return None, None
+
+    df = pd.read_excel(xls, sheet_name=sheet, usecols=list(col_map.keys()))
+    df = df.rename(columns=col_map)
+    if 'GEO' in df.columns:
+        df = df[df['GEO'].astype(str).str.strip() == 'China'].copy()
+    csat_quality_raw = {'cols': quality_cols, 'df': df} if quality_cols else None
+    return df, csat_quality_raw
+
+
 def parse_excel(filepath):
-    """Parse a monthly HR Ops report OR New Case Query export.
-    Auto-detects format and normalizes columns.
-    Returns (df, csat_df, metrics_dict, csat_quality_raw) for China / Sammi."""
+    """Parse a case-detail file (old HR Ops / New Case Query / new Ops+CSAT).
+    Auto-detects sheet roles and column names.
+    Returns (df, csat_df, metrics, csat_quality_raw)."""
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-
-        # ── Detect sheet name ──
         xls = pd.ExcelFile(filepath, engine='openpyxl')
-        sheet_names = xls.sheet_names
 
-        # ── Detect format: HR Ops (HROps) vs New Case Query (Sheet 1 / Sheet0) ──
-        is_hr_ops = 'HROps' in sheet_names
+        df = None
+        csat_df = None
+        csat_quality_raw = None
+        metrics = {}
 
-        if is_hr_ops:
-            # ─── HR Ops Format ───
-            needed_cols = ['GEO', 'Created', 'FirstCloseDate', 'CaseType', 'Origin',
-                           'FirstCloseResolution', 'Owner', 'Individual',
-                           'Title', 'SLA Met Flag', 'FTF', 'Reopen']
-            df_peek = pd.read_excel(xls, sheet_name='HROps', nrows=0)
-            avail_cols = list(df_peek.columns)
-            read_cols = [c for c in needed_cols if c in avail_cols]
-            df = pd.read_excel(xls, sheet_name='HROps', usecols=read_cols)
+        for sheet in xls.sheet_names:
+            try:
+                peek = pd.read_excel(xls, sheet_name=sheet, nrows=0)
+            except Exception:
+                continue
+            cols = list(peek.columns)
+            role = _classify_sheet(cols, sheet)
 
-            if 'GEO' in df.columns:
-                df = df[df['GEO'] == 'China'].copy()
-        else:
-            # ─── New Case Query Format (Salesforce export) ───
-            main_sheet = sheet_names[0]
-            df = pd.read_excel(xls, sheet_name=main_sheet)
+            if role == 'case_detail' and df is None:
+                df = _read_case_detail(xls, sheet, cols)
+            elif role == 'csat' and csat_df is None:
+                csat_df, csat_quality_raw = _read_csat(xls, sheet, cols)
+            elif role == 'metrics_pivot' and not metrics:
+                try:
+                    mdf = pd.read_excel(xls, sheet_name=sheet, header=None)
+                except Exception:
+                    mdf = None
+                if mdf is not None:
+                    metrics = _parse_metrics_sheet(
+                        mdf, df if df is not None else pd.DataFrame(), csat_df)
 
-            # Map columns to internal names expected by analyzer
-            col_map = {}
-            actual_cols = list(df.columns)
-            # CaseType
-            if 'Case Type' in actual_cols and 'CaseType' not in actual_cols:
-                col_map['Case Type'] = 'CaseType'
-            # Resolution
-            if 'Last Close Resolution' in actual_cols and 'FirstCloseResolution' not in actual_cols:
-                col_map['Last Close Resolution'] = 'FirstCloseResolution'
-            # Owner
-            if 'Owner Login Name' in actual_cols and 'Owner' not in actual_cols:
-                col_map['Owner Login Name'] = 'Owner'
-            # Created
-            if 'Created' in actual_cols:
-                pass  # already correct
-            df.rename(columns=col_map, inplace=True)
+    if df is None or len(df) == 0:
+        return pd.DataFrame(), None, {}, None
 
-    # ── Common processing (both formats) ──
+    # ── Common processing (dates, hierarchy, origin, resolution, non-hr) ──
 
-    # Normalize dates
     for col in ['Created', 'FirstCloseDate']:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=False)
 
-    # Case Type hierarchy
     if 'CaseType' in df.columns:
         parsed = df['CaseType'].apply(_simplify_case_type)
         df['_case_major'] = parsed.apply(lambda x: x[0])
@@ -163,15 +271,12 @@ def parse_excel(filepath):
         df['_case_major'] = 'Unknown'
         df['_case_minor'] = 'Unknown'
 
-    # Origin classification
     if 'Origin' in df.columns:
         df['_origin_class'] = df['Origin'].apply(_classify_origin)
 
-    # Resolution classification
     if 'FirstCloseResolution' in df.columns:
         df['_resolution'] = df['FirstCloseResolution'].apply(_classify_resolution)
 
-    # Is Non-HR
     if 'CaseType' in df.columns:
         df['_is_non_hr'] = df['CaseType'].apply(
             lambda x: str(x).startswith('Non-HR') if pd.notna(x) else False
@@ -179,61 +284,161 @@ def parse_excel(filepath):
     else:
         df['_is_non_hr'] = False
 
-    # ── CSAT sheet (HR Ops only) ──
-    csat_df = None
-    csat_quality_raw = None
+    return df, csat_df, metrics, csat_quality_raw
 
-    if is_hr_ops and 'CSAT' in sheet_names:
-        needed_cols = ['GEO', 'Created', 'FirstCloseDate', 'CaseType', 'Origin',
-                       'FirstCloseResolution', 'Owner', 'Individual',
-                       'Title', 'SLA Met Flag', 'FTF', 'Reopen']
+
+def _to_pct(v):
+    """Normalize a KPI rate to a percentage (0-100). Assumes 0-1 means a rate."""
+    if v is None:
+        return None
+    v = float(v)
+    if 0 <= v <= 1:
+        return round(v * 100, 2)
+    return round(v, 2)
+
+
+def _extract_china_value(sdf):
+    for r in range(len(sdf)):
+        for c in range(min(3, len(sdf.columns))):
+            if 'china' in _norm(sdf.iloc[r, c]):
+                for cc in range(c + 1, min(len(sdf.columns), c + 6)):
+                    v = sdf.iloc[r, cc]
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        return float(v)
+                for cc in range(c - 1, -1, -1):
+                    v = sdf.iloc[r, cc]
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        return float(v)
+    return None
+
+
+def _parse_matrix_table(xls, sheet, cols):
+    df = pd.read_excel(xls, sheet_name=sheet)
+    month_col = _match_col(cols, _MONTH_KEYS)
+    case_col = _match_col(cols, ['case volume', 'case count', 'total case', 'volume', 'cases logged', 'case'])
+    sla_col = _match_col(cols, ['sla'])
+    ftf_col = _match_col(cols, ['ftf', 'fcf', 'first time fix', 'first contact fix', 'first time resolution'])
+    csat_col = _match_col(cols, ['survey result', 'csat', 'satisfaction', 'csat score'])
+    rr_col = _match_col(cols, ['csat rr', 'rr', 'response rate'])
+
+    def num(v):
+        if pd.isna(v):
+            return None
         try:
-            csat_peek = pd.read_excel(xls, sheet_name='CSAT', nrows=0)
-        except ValueError:
-            csat_peek = None
+            return float(str(v).replace('%', '').replace(',', '').strip())
+        except (ValueError, TypeError):
+            return None
 
-        if csat_peek is not None:
-            csat_avail = list(csat_peek.columns)
-            csat_read = [c for c in needed_cols if c in csat_avail]
-            quality_col_names = [c for c in csat_avail
-                                if any(kw in str(c).lower() for kw in ['quality', 'interact', 'pers', 'profession', 'serv', 'comm', 'clear'])]
-            all_csat_cols = list(set(csat_read + quality_col_names))
-            csat_df = pd.read_excel(xls, sheet_name='CSAT', usecols=all_csat_cols)
-            if 'GEO' in csat_df.columns:
-                csat_df = csat_df[csat_df['GEO'] == 'China'].copy()
-            quality_cols = {}
-            for col in csat_df.columns:
-                col_lower = str(col).strip().lower()
-                if 'comment' in col_lower or 'feedback' in col_lower:
-                    continue
-                if any(kw in col_lower for kw in ['interaction', 'interact', 'quality', 'solution']):
-                    quality_cols['interaction'] = col
-                elif any(kw in col_lower for kw in ['pers', 'profession', 'serv']):
-                    quality_cols['pers_serv'] = col
-                elif any(kw in col_lower for kw in ['comm', 'clear']):
-                    quality_cols['comm'] = col
+    rows = []
+    for _, row in df.iterrows():
+        if month_col is None or pd.isna(row.get(month_col)):
+            continue
+        rows.append({
+            'month': _fmt_month(row[month_col]),
+            'case_count': num(row[case_col]) if case_col else None,
+            'sla': num(row[sla_col]) if sla_col else None,
+            'ftf': num(row[ftf_col]) if ftf_col else None,
+            'csat': num(row[csat_col]) if csat_col else None,
+            'csat_rr': num(row[rr_col]) if rr_col else None,
+        })
+
+    if not rows:
+        return {}, None
+
+    historical = {}
+    for metric in ['case_count', 'sla', 'ftf', 'csat', 'csat_rr']:
+        series = []
+        for r in rows:
+            v = r[metric]
+            if v is None:
+                continue
+            if metric != 'case_count':
+                v = _to_pct(v)
+            series.append({'month': r['month'], 'value': v})
+        if series:
+            historical[metric] = series
+
+    last = rows[-1]
+    metrics = {}
+    if last['case_count'] is not None:
+        metrics['total_cases'] = int(round(last['case_count']))
+    if last['sla'] is not None:
+        metrics['sla_compliance'] = _to_pct(last['sla'])
+    if last['ftf'] is not None:
+        metrics['ftf_rate'] = _to_pct(last['ftf'])
+    if last['csat'] is not None:
+        metrics['csat_score'] = _to_pct(last['csat'])
+    if last['csat_rr'] is not None:
+        metrics['csat_rr'] = _to_pct(last['csat_rr'])
+
+    return metrics, historical
+
+
+def _parse_raw_metrics_report(xls, sheet_names):
+    metrics = {}
+    for sheet in sheet_names:
+        n = _norm(sheet)
+        if 'rr' in n or 'response' in n:
+            key = 'csat_rr'
+        elif 'sla' in n:
+            key = 'sla_compliance'
+        elif 'ftf' in n or 'fcf' in n or 'first' in n:
+            key = 'ftf_rate'
+        elif 'csat' in n or 'survey' in n or 'satisfaction' in n:
+            key = 'csat_score'
+        elif 'case' in n or 'volume' in n or 'logged' in n:
+            key = 'total_cases'
+        else:
+            continue
+        if key in metrics:
+            continue
+        try:
+            sdf = pd.read_excel(xls, sheet_name=sheet, header=None)
+        except Exception:
+            continue
+        val = _extract_china_value(sdf)
+        if val is None:
+            continue
+        if key == 'total_cases':
+            metrics[key] = int(round(val))
+        else:
+            metrics[key] = _to_pct(val)
+    return metrics
+
+
+def parse_matrix(filepath):
+    """Parse a KPI/trend file into (metrics, historical).
+
+    Supports:
+      - new matrix (Month + Case Volume/SLA/FTF|FCF/Survey Result/CSAT RR columns)
+      - old 12months pivot (section-based, trend only)
+      - raw per-GEO metrics report (best-effort current-month KPI)
+    metrics: current-month KPI (rates already x100)
+    historical: {case_count|sla|ftf|csat|csat_rr: [{month, value}, ...]}
+    """
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        xls = pd.ExcelFile(filepath, engine='openpyxl')
+        sheet_names = xls.sheet_names
+
+        for sheet in sheet_names:
             try:
-                logf = Path(__file__).parent / 'cols_debug.log'
-                with open(logf, 'a') as f:
-                    f.write(f'CSAT columns: {list(csat_df.columns)}\n')
-                    f.write(f'Quality cols matched: {quality_cols}\n')
-                    f.write('---\n')
+                peek = pd.read_excel(xls, sheet_name=sheet, nrows=0)
+            except Exception:
+                continue
+            cols = list(peek.columns)
+            if _classify_sheet(cols, sheet) == 'matrix':
+                return _parse_matrix_table(xls, sheet, cols)
+
+        if any('12month' in _norm(s) or 'historical' in _norm(s) for s in sheet_names):
+            try:
+                return {}, parse_historical(filepath)
             except Exception:
                 pass
-            if quality_cols:
-                csat_quality_raw = {'cols': quality_cols, 'df': csat_df}
 
-    # ── Metrics sheet (HR Ops only) ──
-    metrics = {}
-    if is_hr_ops and 'Metrics' in sheet_names:
-        try:
-            metrics_df = pd.read_excel(xls, sheet_name='Metrics', header=None)
-        except ValueError:
-            metrics_df = None
-        if metrics_df is not None:
-            metrics = _parse_metrics_sheet(metrics_df, df, csat_df)
-
-    return df, csat_df, metrics, csat_quality_raw
+        metrics = _parse_raw_metrics_report(xls, sheet_names)
+        return metrics, None
 
 
 def _classify_resolution(res_str):
@@ -463,6 +668,11 @@ def analyze(df, csat_df=None, metrics=None, csat_quality_raw=None):
         responded = len(csat_df[csat_df['AVARAGE'].notna()]) if 'AVARAGE' in csat_df.columns else 0
         csat_rr = round(responded / total_csat * 100, 2) if total_csat > 0 else None
 
+    # Normalize CSAT to a percentage: old format yields a 1-5 mean (<=5) → x20;
+    # the new matrix already yields a percentage (>5).
+    if csat_score is not None and csat_score <= 5:
+        csat_score = round(csat_score * 20, 2)
+
     stats = {
         'total_cases': total,
         'hr_count': hr_count,
@@ -498,23 +708,25 @@ def analyze(df, csat_df=None, metrics=None, csat_quality_raw=None):
 
 # ── Multi-month comparison ──────────────────────────────────────────────────────
 
-def compute_comparisons(current, prev_months):
+def compute_comparisons(current, prev_months, kpi_history=None):
     """
     Compute vs上月 and vs近三月均值 for the current month.
-    prev_months: list of stats dicts, ordered most recent first (e.g. [May, April, March])
+    prev_months: list of stats dicts, ordered most recent first (e.g. [May, April, March]).
+    kpi_history: optional {metric: [{month, value}]} from a 12-month matrix, preferred for KPI cards.
     Returns current with added comparison fields.
     """
-    if not prev_months:
+    if not prev_months and not kpi_history:
         current['has_comparison'] = False
         current['hotspots'] = []
         current['subtype_growth_ranking'] = []
         return current
 
     current['has_comparison'] = True
-    last_month = prev_months[0]
+    last_month = prev_months[0] if prev_months else {}
 
-    # ── Four card comparisons ──
+    # ── Four card comparisons (matrix KPI history preferred) ──
     current['card_comparisons'] = {}
+    kpi_section_map = {'total': 'case_count', 'sla': 'sla', 'csat_score': 'csat', 'rr': 'csat_rr'}
 
     for card_key, stat_key in [
         ('total', 'total_cases'),
@@ -523,8 +735,17 @@ def compute_comparisons(current, prev_months):
         ('rr', 'csat_rr'),
     ]:
         cur_val = current.get(stat_key)
-        lm_val = last_month.get(stat_key)
-        avg_vals = [m.get(stat_key) for m in prev_months if m.get(stat_key) is not None]
+        lm_val = None
+        avg_vals = []
+        hist = (kpi_history or {}).get(kpi_section_map[card_key])
+        if hist and len(hist) >= 2:
+            hist_vals = [h['value'] for h in hist]
+            lm_val = hist_vals[-2]
+            prev_vals = hist_vals[:-1]
+            avg_vals = prev_vals[-3:]
+        else:
+            lm_val = last_month.get(stat_key)
+            avg_vals = [m.get(stat_key) for m in prev_months if m.get(stat_key) is not None]
 
         comp = {'current': cur_val}
         if lm_val is not None and cur_val is not None:
@@ -685,7 +906,7 @@ def _detect_hotspots(stats, min_base=30, min_growth_pct=20):
     for h in stats.get('type_hierarchy', []):
         if h.get('is_non_hr'):
             continue
-        avg = h.get('avg_3m', 0)
+        avg = h.get('avg_3m') or 0
         if avg < min_base:
             continue
         pct = h.get('vs_3m_pct')
@@ -718,7 +939,7 @@ def generate_monthly_summary(stats):
 
     csat_c = cards.get('csat_score', {})
     if csat_c.get('current') is not None:
-        lines.append(f"CSAT 满意度均分 **{csat_c['current']}/5**。")
+        lines.append(f"CSAT 满意度 **{csat_c['current']}%**。")
 
     rr_c = cards.get('rr', {})
     if rr_c.get('current') is not None:
@@ -797,7 +1018,7 @@ def prepare_ai_prompt(stats):
     lines.append(f"总 Case: {stats['total_cases']}")
     lines.append(f"HR 相关: {stats['hr_count']} / Non-HR: {stats['non_hr_count']}")
     lines.append(f"SLA 达标率: {stats.get('sla_compliance', 'N/A')}%")
-    lines.append(f"CSAT: {stats.get('csat_score', 'N/A')}/5, RR: {stats.get('csat_rr', 'N/A')}%")
+    lines.append(f"CSAT: {stats.get('csat_score', 'N/A')}%, RR: {stats.get('csat_rr', 'N/A')}%")
 
     lines.append('\n### Case Type 大类')
     for h in stats['type_hierarchy'][:10]:
@@ -848,6 +1069,8 @@ def _fmt_month(val):
     if isinstance(val, (_dt.datetime, pd.Timestamp)):
         return val.strftime('%b%Y')
     s = str(val).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
     # Try common string patterns
     import re
     # "2025-06-01 ..." (pandas Timestamp str)
