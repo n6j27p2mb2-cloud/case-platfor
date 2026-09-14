@@ -312,6 +312,19 @@ def _extract_china_value(sdf):
     return None
 
 
+_MONTH_ABBR_TO_NUM = {m.lower(): i for i, m in enumerate(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], 1)}
+
+
+def _month_sort_key(month_str):
+    """Parse 'Apr2016' -> (2016, 4) so months can be sorted chronologically."""
+    m = re.match(r'^([A-Za-z]{3})(\d{4})$', str(month_str))
+    if m:
+        num = _MONTH_ABBR_TO_NUM.get(m.group(1).lower())
+        if num:
+            return (int(m.group(2)), num)
+    return (0, 0)
+
+
 def _parse_matrix_table(xls, sheet, cols):
     df = pd.read_excel(xls, sheet_name=sheet)
     month_col = _match_col(cols, _MONTH_KEYS)
@@ -333,8 +346,10 @@ def _parse_matrix_table(xls, sheet, cols):
     for _, row in df.iterrows():
         if month_col is None or pd.isna(row.get(month_col)):
             continue
+        month_str = _fmt_month(row[month_col])
         rows.append({
-            'month': _fmt_month(row[month_col]),
+            'month': month_str,
+            '_sort': _month_sort_key(month_str),
             'case_count': num(row[case_col]) if case_col else None,
             'sla': num(row[sla_col]) if sla_col else None,
             'ftf': num(row[ftf_col]) if ftf_col else None,
@@ -344,6 +359,10 @@ def _parse_matrix_table(xls, sheet, cols):
 
     if not rows:
         return {}, None
+
+    # Only keep the most recent 12 months, regardless of how much history is uploaded
+    rows.sort(key=lambda r: r['_sort'])
+    rows = rows[-12:]
 
     historical = {}
     for metric in ['case_count', 'sla', 'ftf', 'csat', 'csat_rr']:
