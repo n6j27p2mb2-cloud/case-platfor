@@ -55,8 +55,8 @@
 
         /* Analysis summary line */
         .analysis-line {
-            text-align: center; font-size: 12px; color: #4b5563;
-            background: #f9fafb; border-radius: 8px; padding: 10px 18px; margin-top: 10px;
+            text-align: center; font-size: 15px; color: #374151;
+            background: #f9fafb; border-radius: 8px; padding: 12px 18px; margin-top: 10px;
             line-height: 1.6;
         }
 
@@ -242,7 +242,7 @@
     <!-- ═══════ 月度指标趋势 — widened, bar+lines ═══════ -->
     {% if historical and historical.get('case_count') %}
     <div class="section" id="trend-section">
-        <div class="section-title">月度指标趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">近12月 · China 地区</span></div>
+        <div class="section-title">月度指标趋势 <span style="font-weight:400;font-size:12px;color:#9ca3af;">近13月 · China 地区</span></div>
         <div class="panel" id="trend-panel">
             <div style="height:440px;"><canvas id="trendOverview"></canvas></div>
             {% if stats.analysis_summary_line %}
@@ -854,7 +854,7 @@ if (histCase.length > 0) {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { position: 'top', labels: { font: { size: 9 }, usePointStyle: true, padding: 12, boxWidth: 12 } },
+                legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 12, boxWidth: 12 } },
                 tooltip: { callbacks: {
                     label: function(ctx) {
                         var label = ctx.dataset.label || '';
@@ -868,25 +868,25 @@ if (histCase.length > 0) {
             scales: {
                 y: {
                     position: 'left', type: 'linear',
-                    title: { display: true, text: 'Cases', font: { size: 9 } },
-                    ticks: { stepSize: 2000, font: { size: 9 } },
+                    title: { display: true, text: 'Cases', font: { size: 11 } },
+                    ticks: { stepSize: 2000, font: { size: 11 } },
                     grid: { color: '#f0f0f0' }
                 },
                 y1: {
                     position: 'right', type: 'linear',
                     min: y1AxisMin, max: y1AxisMax,
                     grid: { drawOnChartArea: false },
-                    title: { display: true, text: 'SLA / FTF / CSAT %', font: { size: 9 } },
-                    ticks: { font: { size: 9 }, callback: function(v) { return v.toFixed(1) + '%'; } }
+                    title: { display: true, text: 'SLA / FTF / CSAT %', font: { size: 11 } },
+                    ticks: { font: { size: 11 }, callback: function(v) { return v.toFixed(1) + '%'; } }
                 },
                 y2: {
                     position: 'right', type: 'linear',
                     min: y2AxisMin, max: y2AxisMax,
                     grid: { drawOnChartArea: false },
-                    title: { display: true, text: 'RR %', font: { size: 9 } },
-                    ticks: { font: { size: 9 }, callback: function(v) { return v.toFixed(1) + '%'; } }
+                    title: { display: true, text: 'RR %', font: { size: 11 } },
+                    ticks: { font: { size: 11 }, callback: function(v) { return v.toFixed(1) + '%'; } }
                 },
-                x: { ticks: { font: { size: 8 }, maxRotation: 0, autoSkip: false } }
+                x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: false } }
             }
         }
     });

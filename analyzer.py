@@ -325,6 +325,14 @@ def _month_sort_key(month_str):
     return (0, 0)
 
 
+def _month_to_label(month_str):
+    """'Jul2025' -> \"Jul'25\" for YoY comparison labels."""
+    m = re.match(r'^([A-Za-z]{3})(\d{4})$', str(month_str))
+    if m:
+        return m.group(1) + "'" + m.group(2)[2:]
+    return str(month_str)
+
+
 def _parse_matrix_table(xls, sheet, cols):
     df = pd.read_excel(xls, sheet_name=sheet)
     month_col = _match_col(cols, _MONTH_KEYS)
@@ -360,9 +368,9 @@ def _parse_matrix_table(xls, sheet, cols):
     if not rows:
         return {}, None
 
-    # Only keep the most recent 12 months, regardless of how much history is uploaded
+    # Keep the most recent 13 months (12-month window + prior-year same month for YoY)
     rows.sort(key=lambda r: r['_sort'])
-    rows = rows[-12:]
+    rows = rows[-13:]
 
     historical = {}
     for metric in ['case_count', 'sla', 'ftf', 'csat', 'csat_rr']:
@@ -770,6 +778,13 @@ def compute_comparisons(current, prev_months, kpi_history=None):
         if lm_val is not None and cur_val is not None:
             comp['vs_last'] = round(cur_val - lm_val, 2)
             comp['vs_last_pct'] = round((cur_val - lm_val) / lm_val * 100, 1) if lm_val != 0 else None
+        if card_key == 'total' and hist and len(hist) >= 13:
+            ly_item = hist[-13]
+            ly_val = ly_item['value']
+            if ly_val and cur_val is not None:
+                comp['vs_last_year'] = round(cur_val - ly_val, 2)
+                comp['vs_last_year_pct'] = round((cur_val - ly_val) / ly_val * 100, 1) if ly_val != 0 else None
+                comp['last_year_label'] = _month_to_label(ly_item['month'])
         if avg_vals:
             avg_3m = sum(avg_vals) / len(avg_vals)
             comp['vs_3m_avg'] = round(avg_3m, 2)
@@ -1017,8 +1032,15 @@ def generate_analysis_line(stats, last_month_label=''):
     vs_last_pct = tc.get('vs_last_pct')
     if vs_last is not None and vs_last_pct is not None:
         direction = 'increase' if vs_last > 0 else 'decrease'
-        lm = f' ({last_month_label})' if last_month_label else ''
-        parts.append(f' with {direction} of {abs(vs_last)} cases compared to last month{lm} ({vs_last_pct:+.1f}%)')
+        lm = f' {last_month_label}' if last_month_label else ''
+        parts.append(f' with {direction} of {int(abs(vs_last))} cases compared to last month{lm} ({vs_last_pct:+.1f}%)')
+
+    vs_last_year = tc.get('vs_last_year')
+    vs_last_year_pct = tc.get('vs_last_year_pct')
+    ly_label = tc.get('last_year_label', '')
+    if vs_last_year is not None and vs_last_year_pct is not None:
+        direction = 'increase' if vs_last_year > 0 else 'decrease'
+        parts.append(f', and {direction} of {int(abs(vs_last_year))} cases compared to last year {ly_label} ({vs_last_year_pct:+.1f}%)')
 
     sla = stats.get('sla_compliance', 0) or 0
     ftf = stats.get('ftf_rate', 0) or 0
