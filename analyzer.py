@@ -335,18 +335,33 @@ def _month_to_label(month_str):
 
 def _parse_matrix_table(xls, sheet, cols):
     df = pd.read_excel(xls, sheet_name=sheet)
+
     month_col = _match_col(cols, _MONTH_KEYS)
-    case_col = _match_col(cols, ['case volume', 'case count', 'total case', 'volume', 'cases logged', 'case'])
+    case_col = _match_col(
+        cols,
+        ['case volume', 'case count', 'total case',
+         'volume', 'cases logged', 'case']
+    )
     sla_col = _match_col(cols, ['sla'])
-    ftf_col = _match_col(cols, ['ftf', 'fcf', 'first time fix', 'first contact fix', 'first time resolution'])
-    csat_col = _match_col(cols, ['survey result', 'csat', 'satisfaction', 'csat score'])
+    ftf_col = _match_col(
+        cols,
+        ['ftf', 'fcf', 'first time fix',
+         'first contact fix', 'first time resolution']
+    )
+    csat_col = _match_col(
+        cols,
+        ['survey result', 'csat', 'satisfaction', 'csat score']
+    )
     rr_col = _match_col(cols, ['csat rr', 'rr', 'response rate'])
+    reopen_col = _match_col(cols, ['reopen rate', 'reopen'])
 
     def num(v):
         if pd.isna(v):
             return None
         try:
-            return float(str(v).replace('%', '').replace(',', '').strip())
+            return float(
+                str(v).replace('%', '').replace(',', '').strip()
+            )
         except (ValueError, TypeError):
             return None
 
@@ -354,7 +369,9 @@ def _parse_matrix_table(xls, sheet, cols):
     for _, row in df.iterrows():
         if month_col is None or pd.isna(row.get(month_col)):
             continue
+
         month_str = _fmt_month(row[month_col])
+
         rows.append({
             'month': month_str,
             '_sort': _month_sort_key(month_str),
@@ -363,12 +380,15 @@ def _parse_matrix_table(xls, sheet, cols):
             'ftf': num(row[ftf_col]) if ftf_col else None,
             'csat': num(row[csat_col]) if csat_col else None,
             'csat_rr': num(row[rr_col]) if rr_col else None,
+            'reopen_rate': (
+                num(row[reopen_col]) if reopen_col else None
+            ),
         })
 
     if not rows:
         return {}, None
 
-    # Keep the most recent 13 months (12-month window + prior-year same month for YoY)
+    # Keep 13 months to support prior-year same-month comparison.
     rows.sort(key=lambda r: r['_sort'])
     rows = rows[-13:]
 
@@ -381,22 +401,33 @@ def _parse_matrix_table(xls, sheet, cols):
                 continue
             if metric != 'case_count':
                 v = _to_pct(v)
-            series.append({'month': r['month'], 'value': v})
+            series.append({
+                'month': r['month'],
+                'value': v,
+            })
         if series:
             historical[metric] = series
 
     last = rows[-1]
     metrics = {}
+
     if last['case_count'] is not None:
         metrics['total_cases'] = int(round(last['case_count']))
+
     if last['sla'] is not None:
         metrics['sla_compliance'] = _to_pct(last['sla'])
+
     if last['ftf'] is not None:
         metrics['ftf_rate'] = _to_pct(last['ftf'])
+
     if last['csat'] is not None:
         metrics['csat_score'] = _to_pct(last['csat'])
+
     if last['csat_rr'] is not None:
         metrics['csat_rr'] = _to_pct(last['csat_rr'])
+
+    if last['reopen_rate'] is not None:
+        metrics['reopen_rate'] = _to_pct(last['reopen_rate'])
 
     return metrics, historical
 
