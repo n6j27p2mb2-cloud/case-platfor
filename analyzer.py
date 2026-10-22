@@ -423,14 +423,13 @@ def _parse_matrix_table(xls, sheet, cols):
     if last['csat'] is not None:
         metrics['csat_score'] = _to_pct(last['csat'])
 
-    if last['csat_rr'] is not None:
+     if last['csat_rr'] is not None:
         metrics['csat_rr'] = _to_pct(last['csat_rr'])
 
-if last['reopen_rate'] is not None:
-    metrics['reopen_rate'] = round(last['reopen_rate'], 2)
+    if last['reopen_rate'] is not None:
+        metrics['reopen_rate'] = round(last['reopen_rate'], 2)
 
     return metrics, historical
-
 
 def _parse_raw_metrics_report(xls, sheet_names):
     metrics = {}
